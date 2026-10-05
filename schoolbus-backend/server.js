@@ -23,52 +23,81 @@ const parentRoutes = require('./routes/parentRoutes');
 const locationRoutes = require('./routes/locationRoutes');
 const studentEventRoutes = require('./routes/studentEventRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+
 // ============================================================
 // EXPRESS + HTTP + SOCKET.IO
 // ============================================================
 const app = express();
 const server = http.createServer(app);
 
-const io = socketio(server, {
-    cors: {
-        origin: process.env.CLIENT_URL || '*',
-        methods: ['GET', 'POST', 'PUT', 'DELETE'],
-        credentials: true,
+// ============================================================
+// CORS — accepts localhost + production URL(s)
+// ============================================================
+const ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:5000',
+    process.env.CLIENT_URL,
+    process.env.CLIENT_URL_2,
+].filter(Boolean);
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        // Allow non-browser requests (curl, Postman, mobile)
+        if (!origin) return callback(null, true);
+        if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+        // Allow any Vercel preview deploy URL
+        if (origin.endsWith('.vercel.app')) return callback(null, true);
+        console.warn(`⚠️ Blocked CORS origin: ${origin}`);
+        return callback(new Error('Not allowed by CORS'));
     },
+    credentials: true,
+};
+
+const io = socketio(server, {
+    cors: corsOptions,
 });
 
 app.set('io', io);
 
 // ============================================================
-// 🆕 STARTUP CLEANUP — reset buses stuck in 'on_route' with no active trip
+// STARTUP CLEANUP — retry on failure (Render DB may be warming up)
 // ============================================================
 (async () => {
-    try {
-        const { rowCount } = await pool.query(`
-            UPDATE buses SET status = 'active'
-            WHERE status = 'on_route'
-              AND id NOT IN (
-                SELECT DISTINCT bus_id FROM trips
-                WHERE status = 'in_progress' AND bus_id IS NOT NULL
-              )
-        `);
-        if (rowCount > 0) {
-            console.log(`🔄 Reset ${rowCount} stale bus(es) to 'active' on startup`);
-        } else {
-            console.log(`✅ Bus statuses are in sync`);
+    let attempts = 0;
+    const maxAttempts = 5;
+    while (attempts < maxAttempts) {
+        try {
+            const { rowCount } = await pool.query(`
+                UPDATE buses SET status = 'active'
+                WHERE status = 'on_route'
+                  AND id NOT IN (
+                    SELECT DISTINCT bus_id FROM trips
+                    WHERE status = 'in_progress' AND bus_id IS NOT NULL
+                  )
+            `);
+            if (rowCount > 0) {
+                console.log(`🔄 Reset ${rowCount} stale bus(es) to 'active'`);
+            } else {
+                console.log(`✅ Bus statuses are in sync`);
+            }
+            break;
+        } catch (err) {
+            attempts++;
+            console.error(`❌ Bus reset failed (attempt ${attempts}/${maxAttempts}):`, err.message);
+            if (attempts >= maxAttempts) {
+                console.error('⛔ Giving up on bus reset');
+                break;
+            }
+            await new Promise(r => setTimeout(r, 3000));
         }
-    } catch (err) {
-        console.error('❌ Bus reset failed:', err.message);
     }
 })();
 
 // ============================================================
 // MIDDLEWARE
 // ============================================================
-app.use(cors({
-    origin: process.env.CLIENT_URL || '*',
-    credentials: true,
-}));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -87,8 +116,9 @@ app.use('/api/parent', parentRoutes);
 app.use('/api/buses', locationRoutes);
 app.use('/api/students', studentEventRoutes);
 app.use('/api/ai', aiRoutes);
+
 // ============================================================
-// HEALTH CHECK
+// HEALTH CHECKS
 // ============================================================
 app.get('/api/health', (req, res) => {
     res.json({
@@ -101,26 +131,12 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// ============================================================
-// ROOT
-// ============================================================
 app.get('/', (req, res) => {
-    res.json({
+    res.status(200).json({
+        status: 'ok',
         name: 'SchoolBus Shield API',
         version: '3.1.0',
-        endpoints: {
-            auth: '/api/auth',
-            buses: '/api/buses',
-            students: '/api/students',
-            stops: '/api/stops',
-            alerts: '/api/alerts',
-            drivers: '/api/drivers',
-            admin: '/api/admin',
-            trips: '/api/trips',
-            parent: '/api/parent',
-            studentEvents: '/api/students/:id/events',
-            health: '/api/health',
-        },
+        timestamp: new Date().toISOString(),
     });
 });
 
@@ -140,7 +156,7 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================================
-// 🔐 SOCKET.IO AUTHENTICATION MIDDLEWARE
+// SOCKET.IO AUTH MIDDLEWARE
 // ============================================================
 io.use(async (socket, next) => {
     try {
@@ -183,35 +199,25 @@ io.on('connection', async (socket) => {
     const user = socket.user;
     console.log(`🔌 Client connected: ${socket.id} | ${user?.full_name || 'Anonymous'} | ${user?.role || 'guest'}`);
 
-    // ----------------------------------------------------------
-    // 🎯 AUTO-JOIN ROOMS BY ROLE
-    // ----------------------------------------------------------
+    // ============================================================
+    // AUTO-JOIN ROOMS BY ROLE
+    // ============================================================
     if (user) {
         try {
-            // ADMIN
             if (user.role === 'admin') {
                 socket.join('admin');
                 console.log(`🔧 Admin ${user.full_name} → 'admin'`);
-            }
-
-            // POLICE
-            else if (user.role === 'police') {
+            } else if (user.role === 'police') {
                 socket.join('police');
                 console.log(`👮 Police ${user.full_name} → 'police'`);
-            }
-
-            // DRIVER → their bus room
-            else if (user.role === 'driver') {
+            } else if (user.role === 'driver') {
                 if (user.bus_id) {
                     socket.join(`bus-${user.bus_id}`);
                     console.log(`🚌 Driver ${user.full_name} → bus-${user.bus_id}`);
                 } else {
                     console.log(`⚠️ Driver ${user.full_name} has no bus assigned`);
                 }
-            }
-
-            // PARENT → their children's bus rooms
-            else if (user.role === 'parent') {
+            } else if (user.role === 'parent') {
                 const result = await pool.query(
                     `SELECT DISTINCT bus_id FROM students 
                      WHERE parent_id = $1 AND bus_id IS NOT NULL`,
@@ -227,7 +233,6 @@ io.on('connection', async (socket) => {
                 }
             }
 
-            // Confirmation to client
             socket.emit('authenticated', {
                 user: { id: user.id, full_name: user.full_name, role: user.role },
                 rooms: Array.from(socket.rooms).filter(r => r !== socket.id),
@@ -237,10 +242,9 @@ io.on('connection', async (socket) => {
         }
     }
 
-    // ----------------------------------------------------------
-    // MANUAL JOIN HANDLERS (Backup)
-    // ----------------------------------------------------------
-
+    // ============================================================
+    // MANUAL JOIN HANDLERS
+    // ============================================================
     socket.on('join-parent-room', async (parentId) => {
         try {
             const result = await pool.query(
@@ -297,7 +301,7 @@ io.on('connection', async (socket) => {
     });
 
     // ============================================================
-    // 🆕 DRIVER BUS REASSIGNMENT
+    // DRIVER BUS REASSIGNMENT
     // ============================================================
     socket.on('refresh-driver-bus', async () => {
         if (socket.user?.role !== 'driver') return;
@@ -328,9 +332,7 @@ io.on('connection', async (socket) => {
     });
 
     // ============================================================
-    // 🆕 POLICE LIVE ACTION RELAY
-    // Mirrors HTTP writes so admin + police see realtime updates
-    // even before DB round-trip completes.
+    // POLICE LIVE ACTION RELAY
     // ============================================================
     socket.on('police-acknowledge', (data) => {
         if (socket.user?.role !== 'police' && socket.user?.role !== 'admin') return;
@@ -412,9 +414,9 @@ io.on('connection', async (socket) => {
 // ============================================================
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
-    console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📡 Health check: /api/health`);
+    console.log(`🔌 WebSocket ready`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
