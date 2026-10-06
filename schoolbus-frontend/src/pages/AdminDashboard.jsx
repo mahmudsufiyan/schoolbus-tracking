@@ -3097,7 +3097,7 @@ const AdminDashboard = () => {
                 {/* 🆕 Mobile backdrop — closes sidebar when tapped */}
 {sidebarOpen && (
     <div
-        className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+        className="fixed inset-0 top-16 bg-black/50 z-30 lg:hidden"
         onClick={() => setSidebarOpen(false)}
     />
 )}
@@ -3159,8 +3159,15 @@ const AdminDashboard = () => {
                 </aside>
 
                 <main className="min-h-screen flex-1 overflow-hidden">
-                   <header className="sticky top-0 z-40 border-b border-white/50 bg-white/60 shadow-sm backdrop-blur-xl dark:border-slate-700/50 dark:bg-slate-900/60">
-    <div className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5">
+                   <header className="sticky top-0 z-50 border-b border-white/50 bg-white/60 shadow-sm backdrop-blur-xl dark:border-slate-700/50 dark:bg-slate-900/60">
+    <div
+        className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5"
+        style={{
+            paddingTop: 'max(0.625rem, env(safe-area-inset-top))',
+            paddingLeft: 'max(0.75rem, env(safe-area-inset-left))',
+            paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
+        }}
+    >
         {/* LEFT — hamburger + title */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
             <button
