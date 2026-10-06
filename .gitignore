@@ -35,3 +35,11 @@ desktop.ini
 # Generated QR codes (contain student data)
 qr-*.png
 schoolbus-backend/qr-*.png
+
+# Database exports (contain user data)
+*.sql
+!schema.sql
+
+# Database exports
+schoolbus-backend/data.sql
+schoolbus-backend/schema.sql

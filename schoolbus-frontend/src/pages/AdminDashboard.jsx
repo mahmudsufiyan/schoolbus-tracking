@@ -54,7 +54,12 @@ const AdminDashboard = () => {
     const { user, logout } = useAuth();
     const { socket, on, isConnected } = useSocket();
 
-    const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+        return window.innerWidth >= 1024; // open on desktop, closed on mobile
+    }
+    return true;
+});
     const [activeTab, setActiveTab] = useState('dashboard');
     const [showNotification, setShowNotification] = useState(false);
     const [darkMode, setDarkMode] = useState(() => {
@@ -3089,22 +3094,43 @@ const AdminDashboard = () => {
                     )}
                 </AnimatePresence>
 
-                <aside className={`fixed inset-y-0 left-0 z-50 bg-gradient-to-b from-slate-900 to-slate-800 shadow-2xl transition-all duration-300 dark:from-slate-950 dark:to-slate-900 ${sidebarOpen ? 'w-64' : 'w-0 -translate-x-full'
-                    } lg:relative lg:translate-x-0 lg:block flex-shrink-0`}>
+                {/* 🆕 Mobile backdrop — closes sidebar when tapped */}
+{sidebarOpen && (
+    <div
+        className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+        onClick={() => setSidebarOpen(false)}
+    />
+)}
+
+{/* Sidebar */}
+<aside className={`fixed inset-y-0 left-0 z-50 bg-gradient-to-b from-slate-900 to-slate-800 shadow-2xl transition-transform duration-300 ease-in-out dark:from-slate-950 dark:to-slate-900 ${
+    sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+} lg:translate-x-0 lg:relative w-64 flex-shrink-0`}>
                     <div className="flex h-full flex-col p-4">
                         <div className="mb-8 flex items-center gap-3 px-2">
-                            <div className="rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 p-2.5 shadow-lg shadow-blue-500/25">
-                                <Bus className="h-6 w-6 text-white" />
-                            </div>
-                            <div>
-                                <h1 className="text-lg font-bold text-white">SchoolBus</h1>
-                                <p className="text-xs text-blue-300/70">Admin Panel v2.0</p>
-                            </div>
-                        </div>
+    <div className="rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 p-2.5 shadow-lg shadow-blue-500/25">
+        <Bus className="h-6 w-6 text-white" />
+    </div>
+    <div className="flex-1">
+        <h1 className="text-lg font-bold text-white">SchoolBus</h1>
+        <p className="text-xs text-blue-300/70">Admin Panel v2.0</p>
+    </div>
+    {/* 🆕 Close button — mobile only */}
+    <button
+        onClick={() => setSidebarOpen(false)}
+        className="lg:hidden rounded-lg p-1.5 text-gray-400 hover:text-white hover:bg-white/10 transition"
+        aria-label="Close menu"
+    >
+        <X size={18} />
+    </button>
+</div>
 
                         <nav className="flex-1 space-y-1">
                             {menuItems.map((item) => (
-                                <button key={item.id} onClick={() => setActiveTab(item.id)}
+                                <button key={item.id} onClick={() => {
+    setActiveTab(item.id);
+    if (window.innerWidth < 1024) setSidebarOpen(false);
+}}
                                     className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-all duration-300 ${activeTab === item.id
                                         ? 'border border-blue-500/20 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 text-white shadow-lg shadow-blue-500/10'
                                         : 'text-gray-400 hover:text-white hover:bg-white/5'}`}>
