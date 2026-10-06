@@ -3159,81 +3159,119 @@ const AdminDashboard = () => {
                 </aside>
 
                 <main className="min-h-screen flex-1 overflow-hidden">
-                    <header className="sticky top-0 z-40 border-b border-white/50 bg-white/60 shadow-sm backdrop-blur-xl dark:border-slate-700/50 dark:bg-slate-900/60">
-                        <div className="flex items-center justify-between gap-4 px-4 py-3">
-                            <div className="flex items-center gap-3">
-                                <button onClick={() => setSidebarOpen(!sidebarOpen)}
-                                    className="rounded-xl p-2 text-gray-700 transition hover:bg-gray-100/70 dark:text-gray-300 dark:hover:bg-slate-700/70 lg:hidden">
-                                    {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
-                                </button>
-                                <h2 className="hidden text-lg font-semibold text-gray-700 dark:text-gray-200 sm:block">
-                                    {menuItems.find(item => item.id === activeTab)?.label || 'Dashboard'}
-                                </h2>
+                   <header className="sticky top-0 z-40 border-b border-white/50 bg-white/60 shadow-sm backdrop-blur-xl dark:border-slate-700/50 dark:bg-slate-900/60">
+    <div className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5">
+        {/* LEFT — hamburger + title */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+            <button
+                onClick={() => setSidebarOpen(v => !v)}
+                className="lg:hidden rounded-xl p-2 text-gray-700 transition hover:bg-gray-100/70 dark:text-gray-300 dark:hover:bg-slate-700/70 flex-shrink-0"
+                aria-label="Toggle menu"
+            >
+                {sidebarOpen ? <X size={22} /> : <Menu size={22} />}
+            </button>
+
+            <h2 className="hidden sm:block text-base sm:text-lg font-semibold text-gray-700 dark:text-gray-200 truncate">
+                {menuItems.find(item => item.id === activeTab)?.label || 'Dashboard'}
+            </h2>
+            <span className="sm:hidden text-base font-semibold text-gray-700 dark:text-gray-200 truncate">
+                {menuItems.find(item => item.id === activeTab)?.label || 'Dashboard'}
+            </span>
+        </div>
+
+        {/* RIGHT — dark toggle, search, bell, connection */}
+        <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+            {/* 🆕 Dark mode toggle — always visible */}
+            <button
+                onClick={() => setDarkMode(v => !v)}
+                className="rounded-xl p-2 text-gray-600 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-slate-700/70 flex-shrink-0"
+                aria-label="Toggle dark mode"
+                title={darkMode ? 'Light mode' : 'Dark mode'}
+            >
+                {darkMode
+                    ? <Sun className="h-5 w-5 text-yellow-500" />
+                    : <Moon className="h-5 w-5" />
+                }
+            </button>
+
+            {/* Search — desktop only */}
+            <div className="hidden md:flex items-center rounded-xl border border-gray-200/50 bg-white/50 px-3 py-2 dark:border-slate-700/50 dark:bg-slate-800/50">
+                <Search className="h-4 w-4 text-gray-400" />
+                <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-32 bg-transparent px-2 text-sm text-gray-700 outline-none focus:outline-none dark:text-gray-200 lg:w-48"
+                />
+            </div>
+
+            {/* Notification bell */}
+            <div className="relative flex-shrink-0">
+                <button
+                    onClick={() => setShowNotification(!showNotification)}
+                    className="relative rounded-xl p-2 text-gray-600 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-slate-700/70"
+                    aria-label="Notifications"
+                >
+                    <Bell size={20} />
+                    <span className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-800"></span>
+                </button>
+
+                <AnimatePresence>
+                    {showNotification && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 10 }}
+                            className="absolute right-0 mt-2 w-72 sm:w-80 overflow-hidden rounded-2xl border border-gray-100/50 bg-white shadow-2xl dark:border-slate-700/50 dark:bg-slate-800"
+                        >
+                            <div className="border-b border-gray-100 p-3 dark:border-slate-700">
+                                <p className="font-semibold text-gray-700 dark:text-gray-200">Notifications</p>
                             </div>
-
-                            <div className="flex items-center gap-3">
-                                <div className="hidden items-center rounded-xl border border-gray-200/50 bg-white/50 px-3 py-2 dark:border-slate-700/50 dark:bg-slate-800/50 md:flex">
-                                    <Search className="h-4 w-4 text-gray-400" />
-                                    <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-32 bg-transparent px-2 text-sm text-gray-700 outline-none focus:outline-none dark:text-gray-200 lg:w-48" />
-                                </div>
-
-                                <button onClick={() => setDarkMode(!darkMode)}
-                                    className="rounded-xl p-2 text-gray-600 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-slate-700/70">
-                                    {darkMode ? <Sun className="h-5 w-5 text-yellow-500" /> : <Moon className="h-5 w-5" />}
-                                </button>
-
-                                <div className="relative">
-                                    <button onClick={() => setShowNotification(!showNotification)}
-                                        className="relative rounded-xl p-2 text-gray-600 transition hover:bg-gray-100/70 dark:text-gray-400 dark:hover:bg-slate-700/70">
-                                        <Bell size={20} />
-                                        <span className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500 dark:border-slate-800"></span>
-                                    </button>
-                                    <AnimatePresence>
-                                        {showNotification && (
-                                            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                                                className="absolute right-0 mt-2 w-80 animate-fadeInUp overflow-hidden rounded-2xl border border-gray-100/50 bg-white shadow-2xl dark:border-slate-700/50 dark:bg-slate-800">
-                                                <div className="border-b border-gray-100 p-3 dark:border-slate-700">
-                                                    <p className="font-semibold text-gray-700 dark:text-gray-200">Notifications</p>
-                                                </div>
-                                                <div className="max-h-64 overflow-y-auto">
-                                                    {pendingUsers.length > 0 && (
-                                                        <div className="border-b border-gray-50 p-3 transition hover:bg-gray-50/70 dark:border-slate-700/50 dark:hover:bg-slate-700/50">
-                                                            <p className="text-sm text-gray-800 dark:text-gray-200">📋 {pendingUsers.length} new user(s) pending approval</p>
-                                                            <p className="text-xs text-gray-400 dark:text-gray-500">Just now</p>
-                                                        </div>
-                                                    )}
-                                                    {alerts.filter(a => a.status === 'active').length > 0 && (
-                                                        <div className="border-b border-gray-50 p-3 transition hover:bg-gray-50/70 dark:border-slate-700/50 dark:hover:bg-slate-700/50">
-                                                            <p className="text-sm text-gray-800 dark:text-gray-200">🚨 {alerts.filter(a => a.status === 'active').length} active emergency alert(s)</p>
-                                                            <p className="text-xs text-gray-400 dark:text-gray-500">15 min ago</p>
-                                                        </div>
-                                                    )}
-                                                    {unconfirmedDropoffs.length > 0 && (
-                                                        <div className="border-b border-gray-50 p-3 transition hover:bg-gray-50/70 dark:border-slate-700/50 dark:hover:bg-slate-700/50">
-                                                            <p className="text-sm text-yellow-700 dark:text-yellow-400">⚠️ {unconfirmedDropoffs.length} unconfirmed drop-off(s)</p>
-                                                            <p className="text-xs text-gray-400 dark:text-gray-500">Check the Alerts tab</p>
-                                                        </div>
-                                                    )}
-                                                    {pendingUsers.length === 0 && alerts.filter(a => a.status === 'active').length === 0 && unconfirmedDropoffs.length === 0 && (
-                                                        <div className="p-4 text-center text-gray-400 dark:text-gray-500 text-sm">
-                                                            No new notifications
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
-                                </div>
-
-                                <div className={`hidden items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium sm:flex ${isConnected ? 'border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                                    'border-red-200 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-400'}`}>
-                                    <span className={`h-2 w-2 rounded-full ${isConnected ? 'animate-pulse bg-green-500' : 'bg-red-500'}`}></span>
-                                    {isConnected ? 'Connected' : 'Offline'}
-                                </div>
+                            <div className="max-h-64 overflow-y-auto">
+                                {pendingUsers.length > 0 && (
+                                    <div className="border-b border-gray-50 p-3 transition hover:bg-gray-50/70 dark:border-slate-700/50 dark:hover:bg-slate-700/50">
+                                        <p className="text-sm text-gray-800 dark:text-gray-200">📋 {pendingUsers.length} new user(s) pending approval</p>
+                                        <p className="text-xs text-gray-400 dark:text-gray-500">Just now</p>
+                                    </div>
+                                )}
+                                {alerts.filter(a => a.status === 'active').length > 0 && (
+                                    <div className="border-b border-gray-50 p-3 transition hover:bg-gray-50/70 dark:border-slate-700/50 dark:hover:bg-slate-700/50">
+                                        <p className="text-sm text-gray-800 dark:text-gray-200">🚨 {alerts.filter(a => a.status === 'active').length} active emergency alert(s)</p>
+                                        <p className="text-xs text-gray-400 dark:text-gray-500">15 min ago</p>
+                                    </div>
+                                )}
+                                {unconfirmedDropoffs.length > 0 && (
+                                    <div className="border-b border-gray-50 p-3 transition hover:bg-gray-50/70 dark:border-slate-700/50 dark:hover:bg-slate-700/50">
+                                        <p className="text-sm text-yellow-700 dark:text-yellow-400">⚠️ {unconfirmedDropoffs.length} unconfirmed drop-off(s)</p>
+                                        <p className="text-xs text-gray-400 dark:text-gray-500">Check the Alerts tab</p>
+                                    </div>
+                                )}
+                                {pendingUsers.length === 0 && alerts.filter(a => a.status === 'active').length === 0 && unconfirmedDropoffs.length === 0 && (
+                                    <div className="p-4 text-center text-gray-400 dark:text-gray-500 text-sm">
+                                        No new notifications
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    </header>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+
+            {/* Connection status — tablet+ only */}
+            <div
+                className={`hidden sm:flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium flex-shrink-0 ${
+                    isConnected
+                        ? 'border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-900/30 dark:text-green-400'
+                        : 'border-red-200 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-400'
+                }`}
+            >
+                <span className={`h-2 w-2 rounded-full ${isConnected ? 'animate-pulse bg-green-500' : 'bg-red-500'}`}></span>
+                {isConnected ? 'Connected' : 'Offline'}
+            </div>
+        </div>
+    </div>
+</header>
 
                     <div className="p-4 lg:p-6">
                         {loading ? (
