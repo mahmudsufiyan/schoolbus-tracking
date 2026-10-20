@@ -295,23 +295,26 @@ router.post('/change-password', verifyToken, async (req, res) => {
             return res.status(400).json({ message: 'Invalid password payload' });
         }
 
-        // ⚠️ If your column is 'password_hash' instead of 'password', change below.
+        // ✅ FIXED: Changed 'password' to 'password_hash'
         const userResult = await pool.query(
-            `SELECT password FROM users WHERE id = $1`,
+            `SELECT password_hash FROM users WHERE id = $1`,
             [parent_id]
         );
         if (userResult.rows.length === 0) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        const ok = await bcrypt.compare(current_password, userResult.rows[0].password);
+        // ✅ FIXED: Changed .password to .password_hash
+        const ok = await bcrypt.compare(current_password, userResult.rows[0].password_hash);
         if (!ok) {
             return res.status(401).json({ message: 'Current password is incorrect' });
         }
 
         const hash = await bcrypt.hash(new_password, 10);
+        
+        // ✅ FIXED: Changed 'password = ' to 'password_hash = '
         await pool.query(
-            `UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2`,
+            `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
             [hash, parent_id]
         );
 
