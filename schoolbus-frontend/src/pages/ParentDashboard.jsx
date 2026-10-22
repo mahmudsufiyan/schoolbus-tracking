@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import apiClient from '../api/axiosConfig';
 import ParentAIChat from '../components/ParentAIChat';
-
+import ChatWidget from '../components/ChatWidget';
 const MENU_ITEMS = [
     { id: 'tracking',      label: 'Live Tracking',     icon: MapPin,   badge: null },
     { id: 'children',      label: 'My Children',       icon: Users,    badge: null },
@@ -1349,6 +1349,8 @@ const ParentDashboard = () => {
 
             {/* 🆕 AI Chat Widget — already wired up */}
             <ParentAIChat />
+            {/* 🆕 Parent-Admin Chat Widget */}
+            <ChatWidget />
         </div>
     );
 };

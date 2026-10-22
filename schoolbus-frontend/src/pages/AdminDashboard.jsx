@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import apiClient from '../api/axiosConfig';
 import { QRCodeCanvas } from 'qrcode.react';
 import AIAnalysisCard from '../components/AIAnalysisPanel';
+import ChatWidget from '../components/ChatWidget';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -1362,6 +1363,7 @@ const AdminDashboard = () => {
                         </div>
                     )}
                 </AnimatePresence>
+                
             </motion.div>
         );
     };
@@ -3350,6 +3352,8 @@ const AdminDashboard = () => {
                     </div>
                 )}
             </AnimatePresence>
+            {/* 🆕 Parent-Admin Chat Widget */}
+            <ChatWidget />
         </div>
     );
 };

@@ -23,7 +23,7 @@ const parentRoutes = require('./routes/parentRoutes');
 const locationRoutes = require('./routes/locationRoutes');
 const studentEventRoutes = require('./routes/studentEventRoutes');
 const aiRoutes = require('./routes/aiRoutes');
-
+const chatRoutes = require('./routes/chatRoutes');
 // ============================================================
 // EXPRESS + HTTP + SOCKET.IO
 // ============================================================
@@ -116,7 +116,7 @@ app.use('/api/parent', parentRoutes);
 app.use('/api/buses', locationRoutes);
 app.use('/api/students', studentEventRoutes);
 app.use('/api/ai', aiRoutes);
-
+app.use('/api/chat', chatRoutes);
 // ============================================================
 // HEALTH CHECKS
 // ============================================================
@@ -203,6 +203,8 @@ io.on('connection', async (socket) => {
     // AUTO-JOIN ROOMS BY ROLE
     // ============================================================
     if (user) {
+         socket.join(`user-${user.id}`);
+        console.log(`💬 User ${user.full_name} joined personal room user-${user.id}`);
         try {
             if (user.role === 'admin') {
                 socket.join('admin');
