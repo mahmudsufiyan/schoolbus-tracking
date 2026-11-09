@@ -1,146 +1,96 @@
+// schoolbus-backend/routes/aiRoutes.js
 const express = require('express');
-const pool = require('../db');
-const { verifyToken, checkRole } = require('../middleware/auth');
-const {
-    analyzeEmergencyAlert,
-    askParentAssistant,
-    checkAIHealth,
-} = require('../utils/aiService');
+const { GoogleGenAI } = require('@google/genai');
 
 const router = express.Router();
 
-// ============================================================
-// GET /api/ai/health — public test endpoint (no auth)
-// ============================================================
-router.get('/health', async (req, res) => {
-    const health = await checkAIHealth();
-    res.json(health);
-});
+// Log to confirm the key is loaded
+const apiKey = process.env.GEMINI_API_KEY;
+console.log("🔑 AI Route Initialized. Key starts with:", apiKey ? apiKey.substring(0, 5) + "..." : "❌ MISSING KEY");
 
-// ============================================================
-// POST /api/ai/analyze-alert
-// ============================================================
-router.post('/analyze-alert', verifyToken, checkRole(['admin', 'police']), async (req, res) => {
-    const { alert_id } = req.body;
-    if (!alert_id) return res.status(400).json({ message: 'alert_id required' });
+// Initialize Gemini
+const ai = new GoogleGenAI({ apiKey: apiKey });
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-3.8-flash'; 
 
+const SYSTEM_KNOWLEDGE = `
+BRIGHT FUTURE SCHOOL SYSTEM — Knowledge Base
+
+ABOUT:
+- School: Bright Future School, Bole, Addis Ababa, Ethiopia
+- Levels: KG through Grade 12
+- 1,200+ enrolled students, 4 buses, 12 pickup stops, 15+ years of operation
+- Campuses: Bole Central (KG–Grade 8), Gerji (Grades 9–12)
+
+PROGRAMS:
+- Kindergarten (KG 1–KG 3) — Bole campus
+- Primary School (Grades 1–4) — Bole campus
+- Elementary, 2nd Cycle (Grades 5–8) — Bole campus
+- High School (Grades 9–12) — Gerji campus
+
+BUS ROUTES (4 total, each with 3 stops):
+- BUS-001 Bole Local: Bole → CMC → Bole Michael
+- BUS-002 West Corridor: Kera → Sarbet → Wollo Sefer
+- BUS-003 North Corridor: Arat Kilo → Megenagna → CMC
+- BUS-004 East Corridor: Ayat → Summit → Gerji
+
+HOW BUS TRACKING WORKS:
+1. Register online — enroll child, get parent account
+2. QR check-in — child scans QR card when boarding, parent gets instant notification
+3. Live tracking — parent follows bus on map, gets alerts at 3, 2, and 1 stops away
+
+ENROLLMENT:
+- Enrollment open for 2026, seats available
+- To enroll: click "Enroll" or go to /register
+- Existing users: log in at /login
+
+CONTACT:
+- Email: info@brightfutureschool.et
+- Phone: +251-11-XXX-XXXX
+- Address: Bole, Addis Ababa
+
+RULES:
+- Only answer questions related to Bright Future School.
+- If you don't know something, say so and direct them to contact the office.
+- Keep answers short and friendly.
+- If the user writes in Amharic, reply in Amharic. If in Afaan Oromoo, reply in Afaan Oromoo. Otherwise reply in English.
+`;
+
+router.post('/ask', async (req, res) => {
+    console.log("📩 Received AI Chat Request:", req.body);
+    
     try {
-        const alertRes = await pool.query(
-            `SELECT a.*, b.bus_number, u.full_name AS driver_name
-             FROM emergency_alerts a
-             LEFT JOIN buses b ON b.id = a.bus_id
-             LEFT JOIN users u ON u.id = a.driver_id
-             WHERE a.id = $1`,
-            [alert_id]
-        );
-        if (alertRes.rows.length === 0) {
-            return res.status(404).json({ message: 'Alert not found' });
+        const { question, language = 'en' } = req.body;
+
+        if (!question || typeof question !== 'string') {
+            console.log("⚠️ Error: Question is missing or invalid.");
+            return res.status(400).json({ error: 'Question is required' });
         }
-        const alert = alertRes.rows[0];
 
-        const studentRes = await pool.query(
-            `SELECT COUNT(*)::int AS count FROM students WHERE bus_id = $1`,
-            [alert.bus_id]
-        );
-        const studentCount = studentRes.rows[0]?.count || 0;
+        const langInstruction =
+            language === 'am' ? 'Reply in Amharic.' :
+            language === 'om' ? 'Reply in Afaan Oromoo.' :
+            'Reply in English.';
 
-        const analysis = await analyzeEmergencyAlert(alert, {
-            bus_number: alert.bus_number,
-            driver_name: alert.driver_name,
-            student_count: studentCount,
-            time: alert.created_at,
-            latitude: alert.latitude,
-            longitude: alert.longitude,
-            message: alert.message,
+        const prompt = `${SYSTEM_KNOWLEDGE}\n\n${langInstruction}\n\nUser Question: ${question}`;
+
+        console.log("🤖 Sending request to Gemini API...");
+        
+        // Call Gemini API
+        const response = await ai.models.generateContent({
+            model: MODEL_NAME,
+            contents: prompt,
         });
 
-        await pool.query(
-            `UPDATE emergency_alerts SET ai_analysis = $1::jsonb, ai_status = 'ready' WHERE id = $2`,
-            [JSON.stringify(analysis), alert_id]
-        );
+        console.log("✅ Gemini Responded Successfully!");
+        res.json({ answer: response.text });
 
-        const io = req.app.get('io');
-        if (io) {
-            io.to('admin').emit('ai-analysis-ready', { alert_id, analysis });
-            io.to('police').emit('ai-analysis-ready', { alert_id, analysis });
-        }
-
-        res.json({ success: true, analysis });
     } catch (err) {
-        console.error('❌ POST /ai/analyze-alert', err);
-        await pool.query(
-            `UPDATE emergency_alerts SET ai_status = 'failed' WHERE id = $1`,
-            [alert_id]
-        ).catch(() => {});
-        res.status(500).json({ message: err.message || 'AI analysis failed' });
-    }
-});
-
-// ============================================================
-// POST /api/ai/parent-chat
-// ============================================================
-router.post('/parent-chat', verifyToken, checkRole(['parent']), async (req, res) => {
-    const { question } = req.body;
-    if (!question || question.trim().length === 0) {
-        return res.status(400).json({ message: 'question required' });
-    }
-
-    try {
-        const parentId = req.user.id;
-
-        const childrenRes = await pool.query(
-            `SELECT s.id, s.full_name, s.grade, s.school_name, s.bus_id,
-                    b.bus_number, st.stop_name
-             FROM students s
-             LEFT JOIN buses b ON b.id = s.bus_id
-             LEFT JOIN stops st ON st.id = s.stop_id
-             WHERE s.parent_id = $1`,
-            [parentId]
-        );
-
-        const childBusIds = childrenRes.rows
-            .map(c => c.bus_id)
-            .filter(Boolean);
-
-        let trips = [];
-        if (childBusIds.length > 0) {
-            const tripsRes = await pool.query(
-                `SELECT t.id, t.bus_id, b.bus_number, t.status, t.started_at
-                 FROM trips t
-                 LEFT JOIN buses b ON b.id = t.bus_id
-                 WHERE t.bus_id = ANY($1::int[]) AND t.status = 'in_progress'`,
-                [childBusIds]
-            );
-            trips = tripsRes.rows;
-        }
-
-        const notifRes = await pool.query(
-            `SELECT title, message, created_at
-             FROM notifications
-             WHERE parent_id = $1
-             ORDER BY created_at DESC
-             LIMIT 5`,
-            [parentId]
-        );
-
-        const userRes = await pool.query(
-            `SELECT full_name FROM users WHERE id = $1`,
-            [parentId]
-        );
-
-        const answer = await askParentAssistant(question, {
-            parent_name: userRes.rows[0]?.full_name || 'Parent',
-            children: childrenRes.rows,
-            active_trips: trips,
-            notifications: notifRes.rows,
-        });
-
-        res.json({ success: true, answer });
-    } catch (err) {
-        console.error('❌ POST /ai/parent-chat', err);
-        res.status(500).json({
-            message: err.message || 'AI service unavailable',
-        });
+        // THIS WILL PRINT THE EXACT ERROR TO YOUR TERMINAL
+        console.error('\n🔥🔥🔥 EXACT AI ERROR 🔥🔥🔥');
+        console.error(err);
+        console.error('🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥\n');
+        
+        res.status(500).json({ error: 'AI unavailable. Check server logs.' });
     }
 });
 

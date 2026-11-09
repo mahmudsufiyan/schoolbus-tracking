@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import AIAssistant from '../components/AIAssistant';
 import {
     Bus, MapPin, Users, Shield, Bell, Menu, X, ArrowRight,
     Phone, Mail, Map, School, QrCode, CheckCircle,
@@ -1202,7 +1203,11 @@ const Home = () => {
                     </div>
                 </div>
             </footer>
-        </div>
+
+            {/* ========== AI ASSISTANT ========== */}
+            <AIAssistant language={language} />
+);
+</div>
     );
 };
 

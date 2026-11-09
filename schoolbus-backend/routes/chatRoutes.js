@@ -5,7 +5,6 @@ const { verifyToken } = require('../middleware/auth');
 
 // ============================================================
 // GET /api/chat/messages/:contactId
-// Get chat history between the logged-in user and a specific contact
 // ============================================================
 router.get('/messages/:contactId', verifyToken, async (req, res) => {
     try {
@@ -22,7 +21,6 @@ router.get('/messages/:contactId', verifyToken, async (req, res) => {
             [userId, contactId]
         );
 
-        // Mark messages from the contact as read
         await pool.query(
             `UPDATE chat_messages SET is_read = TRUE 
              WHERE sender_id = $1 AND receiver_id = $2 AND is_read = FALSE`,
@@ -31,14 +29,14 @@ router.get('/messages/:contactId', verifyToken, async (req, res) => {
 
         res.json(result.rows);
     } catch (err) {
-        console.error('❌ GET /chat/messages error:', err);
+        console.error('💥💥💥 [CHAT-ERROR] GET /chat/messages:', err.message);
+        console.error('💥 [CHAT-ERROR] Full:', err);
         res.status(500).json({ message: 'Server error', error: err.message });
     }
 });
 
 // ============================================================
 // POST /api/chat/messages
-// Send a new message
 // ============================================================
 router.post('/messages', verifyToken, async (req, res) => {
     try {
@@ -58,24 +56,22 @@ router.post('/messages', verifyToken, async (req, res) => {
 
         const newMessage = result.rows[0];
 
-        // Emit real-time socket event to the receiver
         const io = req.app.get('io');
         if (io) {
             io.to(`user-${receiver_id}`).emit('new-chat-message', newMessage);
-            // Also emit to sender so their other tabs update
             io.to(`user-${sender_id}`).emit('new-chat-message', newMessage);
         }
 
         res.status(201).json(newMessage);
     } catch (err) {
-        console.error('❌ POST /chat/messages error:', err);
+        console.error('💥💥💥 [CHAT-ERROR] POST /chat/messages:', err.message);
+        console.error('💥 [CHAT-ERROR] Full:', err);
         res.status(500).json({ message: 'Server error', error: err.message });
     }
 });
 
 // ============================================================
 // PUT /api/chat/messages/:contactId/read
-// Mark all messages from a specific contact as read
 // ============================================================
 router.put('/messages/:contactId/read', verifyToken, async (req, res) => {
     try {
@@ -90,14 +86,14 @@ router.put('/messages/:contactId/read', verifyToken, async (req, res) => {
 
         res.json({ success: true });
     } catch (err) {
-        console.error('❌ PUT /chat/messages/:contactId/read error:', err);
+        console.error('💥💥💥 [CHAT-ERROR] PUT /chat/messages/read:', err.message);
+        console.error('💥 [CHAT-ERROR] Full:', err);
         res.status(500).json({ message: 'Server error', error: err.message });
     }
 });
 
 // ============================================================
 // GET /api/chat/contacts
-// Get list of contacts (Parents see Admin, Admin sees Parents)
 // ============================================================
 router.get('/contacts', verifyToken, async (req, res) => {
     try {
@@ -105,26 +101,24 @@ router.get('/contacts', verifyToken, async (req, res) => {
 
         let query = '';
         if (role === 'parent') {
-            // Parents talk to admins
             query = `SELECT id, full_name, email, role FROM users WHERE role = 'admin' LIMIT 1`;
         } else if (role === 'admin') {
-            // Admins see all parents
             query = `SELECT id, full_name, email, role FROM users WHERE role = 'parent' ORDER BY full_name`;
         } else {
-            return res.json([]); // Other roles have no chat
+            return res.json([]);
         }
 
         const result = await pool.query(query);
         res.json(result.rows);
     } catch (err) {
-        console.error('❌ GET /chat/contacts error:', err);
+        console.error('💥💥💥 [CHAT-ERROR] GET /chat/contacts:', err.message);
+        console.error('💥 [CHAT-ERROR] Full:', err);
         res.status(500).json({ message: 'Server error', error: err.message });
     }
 });
 
 // ============================================================
 // GET /api/chat/unread
-// Get count of unread messages for the logged-in user
 // ============================================================
 router.get('/unread', verifyToken, async (req, res) => {
     try {
@@ -136,7 +130,8 @@ router.get('/unread', verifyToken, async (req, res) => {
         );
         res.json({ count: parseInt(result.rows[0].count) });
     } catch (err) {
-        console.error('❌ GET /chat/unread error:', err);
+        console.error('💥💥💥 [CHAT-ERROR] GET /chat/unread:', err.message);
+        console.error('💥 [CHAT-ERROR] Full:', err);
         res.status(500).json({ message: 'Server error', error: err.message });
     }
 });
