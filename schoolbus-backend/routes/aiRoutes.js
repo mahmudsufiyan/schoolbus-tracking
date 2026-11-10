@@ -4,13 +4,11 @@ const { GoogleGenAI } = require('@google/genai');
 
 const router = express.Router();
 
-// Log to confirm the key is loaded
+// Initialize Gemini using the variables from your .env
 const apiKey = process.env.GEMINI_API_KEY;
 console.log("🔑 AI Route Initialized. Key starts with:", apiKey ? apiKey.substring(0, 5) + "..." : "❌ MISSING KEY");
 
-// Initialize Gemini
 const ai = new GoogleGenAI({ apiKey: apiKey });
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-3.8-flash'; 
 
 const SYSTEM_KNOWLEDGE = `
 BRIGHT FUTURE SCHOOL SYSTEM — Knowledge Base
@@ -55,6 +53,9 @@ RULES:
 - If the user writes in Amharic, reply in Amharic. If in Afaan Oromoo, reply in Afaan Oromoo. Otherwise reply in English.
 `;
 
+// Helper function for waiting during retries
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 router.post('/ask', async (req, res) => {
     console.log("📩 Received AI Chat Request:", req.body);
     
@@ -73,23 +74,63 @@ router.post('/ask', async (req, res) => {
 
         const prompt = `${SYSTEM_KNOWLEDGE}\n\n${langInstruction}\n\nUser Question: ${question}`;
 
-        console.log("🤖 Sending request to Gemini API...");
-        
-        // Call Gemini API
-        const response = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: prompt,
-        });
+        // Define the list of models to try: primary model first, then backups
+        const modelsToTry = ['gemini-3.5-flash', 'gemini-flash-lite-latest', 'gemini-3.8-flash'];
+        let lastError = null;
+        let successAnswer = null;
 
-        console.log("✅ Gemini Responded Successfully!");
-        res.json({ answer: response.text });
+        // Loop through each model
+        for (const modelName of modelsToTry) {
+            // For each model, try up to 3 times if it's a 503 error
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    console.log(`🤖 Trying model: ${modelName}, attempt ${attempt}...`);
+                    
+                    const response = await ai.models.generateContent({
+                        model: modelName,
+                        contents: prompt,
+                    });
+
+                    console.log(`✅ Success with ${modelName}!`);
+                    successAnswer = response.text;
+                    break; // Break the retry loop if successful
+
+                } catch (err) {
+                    lastError = err;
+                    
+                    // If it's a 503 (Server Busy), we wait and retry
+                    if (err.status === 503) {
+                        console.warn(`⚠️ ${modelName} is busy (503). Retrying...`);
+                        const waitTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+                        await sleep(waitTime);
+                    } else {
+                        // If it's an API key error or other bad request, don't retry, switch model immediately
+                        console.error(`❌ Non-503 error on ${modelName}:`, err.message);
+                        break; 
+                    }
+                }
+            }
+            
+            // If we got an answer from this model, stop looping through other models
+            if (successAnswer) break;
+            
+            console.log(`❌ Model ${modelName} failed after 3 attempts. Switching to next model...`);
+        }
+
+        // If we successfully got an answer
+        if (successAnswer) {
+            return res.json({ answer: successAnswer });
+        }
+
+        // If all models and retries failed
+        console.error('\n🔥🔥🔥 ALL MODELS FAILED 🔥🔥🔥');
+        console.error(lastError);
+        res.status(503).json({ error: 'AI is temporarily busy. Please try again in a moment.' });
 
     } catch (err) {
-        // THIS WILL PRINT THE EXACT ERROR TO YOUR TERMINAL
-        console.error('\n🔥🔥🔥 EXACT AI ERROR 🔥🔥🔥');
+        // Catch any general code errors
+        console.error('\n🔥🔥🔥 UNEXPECTED ERROR 🔥🔥🔥');
         console.error(err);
-        console.error('🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥\n');
-        
         res.status(500).json({ error: 'AI unavailable. Check server logs.' });
     }
 });
