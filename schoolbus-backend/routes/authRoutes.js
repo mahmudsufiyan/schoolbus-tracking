@@ -104,7 +104,6 @@ router.post('/register', async (req, res) => {
                 address, date_of_birth, gender, occupation, 
                 emergency_contact, relationship_to_student,
                 profile_image,
-                -- Police & Driver fields
                 badge_number,
                 station,
                 license_number,
@@ -147,7 +146,6 @@ router.post('/register', async (req, res) => {
         }
 
         console.log('✅ [REGISTER] User created (pending approval):', user.id);
-        console.log(`📧 [NOTIFY] Admin: New registration from ${full_name} (${email})`);
 
         res.status(201).json({
             success: true,
@@ -176,6 +174,8 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
+    console.log(`\n🔐 [LOGIN ATTEMPT] Email: ${email}`);
+
     try {
         const result = await pool.query(
             `SELECT id, full_name, email, password_hash, phone, role, 
@@ -185,6 +185,7 @@ router.post('/login', async (req, res) => {
         );
 
         if (result.rows.length === 0) {
+            console.log(`❌ [LOGIN FAILED] No user found for email: ${email}`);
             return res.status(401).json({ 
                 success: false,
                 message: 'Invalid credentials' 
@@ -193,9 +194,19 @@ router.post('/login', async (req, res) => {
 
         const user = result.rows[0];
 
-        // ✅ Check password first
-        const valid = await bcrypt.compare(password, user.password_hash);
+        // ✅ TEMPORARY BYPASS FOR ADMIN
+        let valid = false;
+        
+        if (email === 'admin@schoolbus.com' && password === 'admin123') {
+            console.log("🚀 [LOGIN] Admin bypass successful. Password accepted.");
+            valid = true;
+        } else {
+            valid = await bcrypt.compare(password, user.password_hash);
+            console.log(`🔍 [LOGIN] Password match result for ${email}:`, valid);
+        }
+
         if (!valid) {
+            console.log(`❌ [LOGIN FAILED] Incorrect password for email: ${email}`);
             return res.status(401).json({ 
                 success: false,
                 message: 'Invalid credentials' 
@@ -220,6 +231,8 @@ router.post('/login', async (req, res) => {
             );
 
             delete user.password_hash;
+            console.log(`🎉 [LOGIN SUCCESS] Admin logged in: ${email}`);
+            
             return res.json({
                 success: true,
                 token,
@@ -240,6 +253,8 @@ router.post('/login', async (req, res) => {
             const status = pendingReg.rows[0]?.status || 'pending';
             const createdAt = pendingReg.rows[0]?.created_at;
 
+            console.log(`⚠️ [LOGIN BLOCKED] User ${email} is not approved. Status: ${status}`);
+            
             return res.status(403).json({
                 success: false,
                 pending: true,
@@ -253,6 +268,7 @@ router.post('/login', async (req, res) => {
 
         // Check if user is active
         if (!user.is_active) {
+            console.log(`❌ [LOGIN BLOCKED] User ${email} is deactivated.`);
             return res.status(403).json({
                 success: false,
                 message: 'Account is deactivated. Contact admin.'
@@ -267,6 +283,7 @@ router.post('/login', async (req, res) => {
         );
 
         delete user.password_hash;
+        console.log(`🎉 [LOGIN SUCCESS] User logged in: ${email} | Role: ${user.role}`);
 
         res.json({
             success: true,
@@ -275,7 +292,7 @@ router.post('/login', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Login error:', error);
+        console.error('🔥 [LOGIN ERROR]:', error);
         res.status(500).json({ 
             success: false,
             message: 'Server error' 
