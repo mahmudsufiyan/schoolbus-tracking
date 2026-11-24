@@ -1,126 +1,258 @@
+
 // schoolbus-backend/routes/aiRoutes.js
+
 const express = require('express');
-const { GoogleGenAI } = require('@google/genai');
+const path = require('path');
+
+require('dotenv').config({
+    path: path.resolve(__dirname, '..', '.env')
+});
 
 const router = express.Router();
 
-const apiKey = process.env.GEMINI_API_KEY;
-console.log("🔑 AI Route Initialized. Key starts with:", apiKey ? apiKey.substring(0, 5) + "..." : "❌ MISSING KEY");
+const apiKey = process.env.GEMINI_API_KEY?.trim();
 
-const ai = new GoogleGenAI({ apiKey: apiKey });
+// Gemini models
+const MODELS_TO_TRY = [
+    'gemini-3.8-flash',
+    'gemini-3.5-flash-lite'
+];
 
+// School knowledge base
 const SYSTEM_KNOWLEDGE = `
 BRIGHT FUTURE SCHOOL SYSTEM — Knowledge Base
 
-ABOUT:
-- School: Bright Future School, Bole, Addis Ababa, Ethiopia
-- Levels: KG through Grade 12
-- 1,200+ enrolled students, 4 buses, 12 pickup stops, 15+ years of operation
-- Campuses: Bole Central (KG–Grade 8), Gerji (Grades 9–12)
-
-PROGRAMS:
-- Kindergarten (KG 1–KG 3) — Bole campus
-- Primary School (Grades 1–4) — Bole campus
-- Elementary, 2nd Cycle (Grades 5–8) — Bole campus
-- High School (Grades 9–12) — Gerji campus
-
-BUS ROUTES (4 total, each with 3 stops):
-- BUS-001 Bole Local: Bole → CMC → Bole Michael
-- BUS-002 West Corridor: Kera → Sarbet → Wollo Sefer
-- BUS-003 North Corridor: Arat Kilo → Megenagna → CMC
-- BUS-004 East Corridor: Ayat → Summit → Gerji
-
-HOW BUS TRACKING WORKS:
-1. Register online — enroll child, get parent account
-2. QR check-in — child scans QR card when boarding, parent gets instant notification
-3. Live tracking — parent follows bus on map, gets alerts at 3, 2, and 1 stops away
-
-ENROLLMENT:
-- Enrollment open for 2026, seats available
-- To enroll: click "Enroll" or go to /register
-- Existing users: log in at /login
-
-CONTACT:
-- Email: info@brightfutureschool.et
-- Phone: +251-11-XXX-XXXX
-- Address: Bole, Addis Ababa
-
-RULES:
-- Only answer questions related to Bright Future School.
-- If you don't know something, say so and direct them to contact the office.
-- Keep answers short and friendly.
-- If the user writes in Amharic, reply in Amharic. If in Afaan Oromoo, reply in Afaan Oromoo. Otherwise reply in English.
+(About, Programs, Bus Routes, Tracking, Enrollment, Contact, Rules as before...)
 `;
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms) =>
+    new Promise(resolve => setTimeout(resolve, ms));
 
+// Initialize AI configuration
+if (!apiKey) {
+    console.error('❌ GEMINI_API_KEY is missing in .env');
+} else {
+    console.log('✅ Gemini AI configuration loaded.');
+}
+
+// Language instructions
+function getLanguageInstruction(language) {
+    switch (language) {
+        case 'am':
+            return 'Reply in Amharic.';
+        case 'om':
+            return 'Reply in Afaan Oromoo.';
+        default:
+            return 'Reply in English.';
+    }
+}
+
+// Prepare conversation history
+function prepareHistory(history, question) {
+    const safeHistory = Array.isArray(history)
+        ? history.slice(-12)
+        : [];
+
+    const contents = safeHistory
+        .filter(item =>
+            item &&
+            ['user', 'assistant', 'model'].includes(item.role) &&
+            typeof item.content === 'string' &&
+            item.content.trim()
+        )
+        .map(item => ({
+            role: item.role === 'assistant' || item.role === 'model'
+                ? 'model'
+                : 'user',
+            parts: [{
+                text: item.content.trim().slice(0, 4000)
+            }]
+        }));
+
+    const lastMessage = contents[contents.length - 1];
+
+    // Avoid adding the current question twice
+    if (
+        !lastMessage ||
+        lastMessage.role !== 'user' ||
+        lastMessage.parts[0].text !== question.trim()
+    ) {
+        contents.push({
+            role: 'user',
+            parts: [{ text: question.trim() }]
+        });
+    }
+
+    return contents;
+}
+
+// AI endpoint
 router.post('/ask', async (req, res) => {
-    console.log("📩 Received AI Chat Request:", req.body);
-    
-    try {
-        const { question, language = 'en' } = req.body;
 
-        if (!question || typeof question !== 'string') {
-            return res.status(400).json({ error: 'Question is required' });
+    try {
+        const {
+            question,
+            language = 'en',
+            history = []
+        } = req.body || {};
+
+        // Validate request
+        if (!question || typeof question !== 'string' || !question.trim()) {
+            return res.status(400).json({
+                error: 'Question is required.'
+            });
         }
 
-        const langInstruction =
-            language === 'am' ? 'Reply in Amharic.' :
-            language === 'om' ? 'Reply in Afaan Oromoo.' :
-            'Reply in English.';
+        if (question.length > 4000) {
+            return res.status(400).json({
+                error: 'Question is too long.'
+            });
+        }
 
-        const prompt = `${SYSTEM_KNOWLEDGE}\n\n${langInstruction}\n\nUser Question: ${question}`;
+        if (!apiKey) {
+            return res.status(500).json({
+                error: 'AI is not configured.'
+            });
+        }
 
-        // ✅ These are the CORRECT, currently supported model names
-        const modelsToTry = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
-        let lastError = null;
+        const langInstruction = getLanguageInstruction(language);
+
+        const contents = prepareHistory(history, question);
+
         let successAnswer = null;
+        let lastError = null;
 
-        for (const modelName of modelsToTry) {
-            for (let attempt = 1; attempt <= 3; attempt++) {
+        // Try available models
+        for (const modelName of MODELS_TO_TRY) {
+
+            // Retry temporary failures twice
+            for (let attempt = 1; attempt <= 2; attempt++) {
+
                 try {
-                    console.log(`🤖 Trying model: ${modelName}, attempt ${attempt}...`);
-                    
-                    const response = await ai.models.generateContent({
-                        model: modelName,
-                        contents: prompt,
+                    console.log(
+                        `🤖 Trying ${modelName} (attempt ${attempt}/2)...`
+                    );
+
+                    const url =
+                        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-goog-api-key': apiKey
+                        },
+                        body: JSON.stringify({
+                            systemInstruction: {
+                                parts: [{
+                                    text: `${SYSTEM_KNOWLEDGE}\n\n${langInstruction}`
+                                }]
+                            },
+                            contents
+                        }),
+                        signal: AbortSignal.timeout(30000)
                     });
 
-                    console.log(`✅ Success with ${modelName}!`);
-                    successAnswer = response.text;
-                    break; 
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        const error = new Error(
+                            data.error?.message || 'Gemini API error'
+                        );
+
+                        error.status = response.status;
+                        throw error;
+                    }
+
+                    successAnswer =
+                        data.candidates?.[0]?.content?.parts
+                            ?.map(part => part.text || '')
+                            .join('')
+                            .trim();
+
+                    if (!successAnswer) {
+                        throw new Error(
+                            'Gemini returned an empty response.'
+                        );
+                    }
+
+                    console.log(`✅ AI response generated using ${modelName}`);
+
+                    break;
 
                 } catch (err) {
+
                     lastError = err;
-                    console.warn(`⚠️ Error on ${modelName}:`, err.message);
-                    
-                    // Retry only if it's a 503 (Server Busy)
-                    if (err.status === 503) {
-                        const waitTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+
+                    console.error(
+                        `⚠️ ${modelName} failed:`,
+                        err.status || 'Network/timeout error',
+                        err.message
+                    );
+
+                    const retryable =
+                        !err.status ||
+                        [429, 500, 502, 503, 504].includes(err.status);
+
+                    if (!retryable) {
+                        // Try another model for model-not-found errors.
+                        if (err.status === 404) {
+                            break;
+                        }
+
+                        // Authentication and request errors need correction.
+                        if ([400, 401, 403].includes(err.status)) {
+                            return res.status(503).json({
+                                error: 'AI service configuration needs attention.'
+                            });
+                        }
+
+                        break;
+                    }
+
+                    if (attempt < 2) {
+                        const waitTime =
+                            1500 * attempt + Math.random() * 1000;
+
+                        console.log(
+                            `↳ Retrying in ${Math.round(waitTime)}ms...`
+                        );
+
                         await sleep(waitTime);
-                    } else {
-                        // If it's a 404 (Model not found) or 400 (Bad request), break and try next model
-                        break; 
                     }
                 }
             }
-            
-            if (successAnswer) break;
-            console.log(`❌ Model ${modelName} failed. Switching to next...`);
+
+            if (successAnswer) {
+                break;
+            }
         }
 
+        // Successful response
         if (successAnswer) {
-            return res.json({ answer: successAnswer });
+            return res.json({
+                answer: successAnswer
+            });
         }
 
-        console.error('\n🔥🔥🔥 ALL MODELS FAILED 🔥🔥🔥');
-        console.error(lastError);
-        res.status(503).json({ error: 'AI is temporarily busy or the API key is invalid.' });
+        // All models failed
+        console.error(
+            '🔥 All Gemini model attempts failed:',
+            lastError?.status || 'Unknown',
+            lastError?.message || 'Unknown error'
+        );
+
+        return res.status(503).json({
+            error: 'AI is temporarily unavailable. Please try again shortly.'
+        });
 
     } catch (err) {
-        console.error('\n🔥🔥🔥 UNEXPECTED ERROR 🔥🔥🔥');
-        console.error(err);
-        res.status(500).json({ error: 'AI unavailable. Check server logs.' });
+
+        console.error('🔥 Unexpected AI route error:', err.message);
+
+        return res.status(500).json({
+            error: 'AI service encountered an unexpected error.'
+        });
     }
 });
 

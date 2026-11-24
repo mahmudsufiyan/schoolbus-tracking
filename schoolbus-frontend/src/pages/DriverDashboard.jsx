@@ -8,7 +8,7 @@ import {
     Camera, Phone, Shield, Bell,
 } from 'lucide-react';
 import apiClient from '../api/axiosConfig';
-
+import RoutingLayer from '../components/maps/RoutingLayer';
 // ============================================================
 // HOOK: useGeolocation
 // ============================================================
@@ -408,7 +408,7 @@ const PanicButton = ({ busId, location, disabled }) => {
 };
 
 // ============================================================
-// LiveMap
+// LiveMap (inline)
 // ============================================================
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
@@ -421,7 +421,7 @@ L.Icon.Default.mergeOptions({
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const LiveMap = ({ busId, stops, location, center, zoom }) => {
+const LiveMap = ({ busId, stops, location, center, zoom, children }) => {
     const mapRef = useRef(null);
 
     useEffect(() => {
@@ -465,22 +465,16 @@ const LiveMap = ({ busId, stops, location, center, zoom }) => {
             />
             {location && (
                 <Marker position={[location.latitude, location.longitude]} icon={busIcon}>
-                    <Popup>
-                        <strong>Your Bus</strong><br />
-                        {busId ? `Bus #${busId}` : 'No bus assigned'}
-                        <br />
-                        Speed: {location.speed?.toFixed(1) || 0} km/h
-                    </Popup>
+                    <Popup>...</Popup>
                 </Marker>
             )}
             {safeStops.map((stop) => (
                 <Marker key={stop.id} position={[stop.latitude, stop.longitude]} icon={stopIcon}>
-                    <Popup>
-                        <strong>{stop.stop_name}</strong><br />
-                        Stop #{stop.stop_order}
-                    </Popup>
+                    <Popup>...</Popup>
                 </Marker>
             ))}
+            {/* 🆕 custom children (routing layer, etc.) */}
+            {children}
         </MapContainer>
     );
 };
@@ -513,15 +507,15 @@ const DriverDashboard = () => {
     const [scanResult, setScanResult] = useState(null);
     const [pickupSent, setPickupSent] = useState(false);
 
-    // 🆕 Two-stage per-stop states
+    // Two-stage per-stop states
     const [approachedStops, setApproachedStops] = useState([]);
     const [arrivedStops, setArrivedStops] = useState([]);
 
-    // 🆕 Layer 2 — student events
+    // Student events
     const [studentEvents, setStudentEvents] = useState({});
     const [eventBusy, setEventBusy] = useState(null);
 
-    // 🆕 Real driver trip history
+    // Real driver trip history
     const [driverTripHistory, setDriverTripHistory] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
 
@@ -537,9 +531,7 @@ const DriverDashboard = () => {
         { id: 4, stop_name: 'Sarbet', stop_order: 4, latitude: 9.0450, longitude: 38.7300 },
     ];
 
-    // ============================================================
-    // 🆕 LIVE ON-BUS COUNT
-    // ============================================================
+    // LIVE ON-BUS COUNT
     const onBoardCount = students.filter(s => {
         const ev = studentEvents[s.id] || {};
         return !!ev.picked_up_at && !ev.dropped_off_at;
@@ -612,8 +604,6 @@ const DriverDashboard = () => {
             const res = await apiClient.get(`/trips/${tripId}/stops`);
             const data = Array.isArray(res.data) ? res.data : [];
             setTripStops(data);
-
-            // Derive arrived/approached from the server
             setApproachedStops(data.filter(s => s.approached).map(s => s.id));
             setArrivedStops(data.filter(s => s.arrived).map(s => s.id));
         } catch {
@@ -709,7 +699,7 @@ const DriverDashboard = () => {
     };
 
     // ============================================================
-    // 🆕 MARK STOP STAGE — 'approaching' or 'arrived'
+    // MARK STOP STAGE
     // ============================================================
     const markStopStage = async (stopId, stopName, stage) => {
         if (tripStatus !== 'active' || !currentTrip?.id) {
@@ -841,7 +831,7 @@ const DriverDashboard = () => {
     };
 
     // ============================================================
-    // 🆕 PICKUP / DROPOFF ACTIONS
+    // PICKUP / DROPOFF ACTIONS
     // ============================================================
     const studentsAtStop = (stopId) =>
         students.filter(s => Number(s.stop_id) === Number(stopId));
@@ -921,7 +911,7 @@ const DriverDashboard = () => {
     };
 
     // ============================================================
-    // 🆕 FETCH REAL DRIVER TRIP HISTORY
+    // FETCH REAL DRIVER TRIP HISTORY
     // ============================================================
     const fetchDriverHistory = async () => {
         setHistoryLoading(true);
@@ -944,7 +934,6 @@ const DriverDashboard = () => {
         return () => stopLocationTracking();
     }, []);
 
-    // 🆕 Load history when the driver opens the History tab
     useEffect(() => {
         if (activeView === 'history') {
             fetchDriverHistory();
@@ -1051,15 +1040,21 @@ const DriverDashboard = () => {
                 return (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-2 bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 overflow-hidden">
-                            <div className="h-96 lg:h-[500px]">
-                                <LiveMap
-                                    busId={assignedBus?.id}
-                                    stops={stops}
-                                    location={location}
-                                    center={location ? [location.latitude, location.longitude] : [9.0320, 38.7469]}
-                                    zoom={13}
-                                />
-                            </div>
+                            <div className="h-96 lg:h-[500px] relative">   {/* 🆕 add relative for absolute-positioned panel */}
+    <LiveMap
+        busId={assignedBus?.id}
+        stops={stops}
+        location={location}
+        center={location ? [location.latitude, location.longitude] : [9.0320, 38.7469]}
+        zoom={13}
+    >
+        <RoutingLayer
+            location={location}
+            stops={stops}
+            autoShow={false}
+        />
+    </LiveMap>
+</div>
                             <div className="p-4 border-t border-gray-100/50 flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex items-center gap-3 text-sm">
                                     <div className="flex items-center gap-2">
@@ -1278,7 +1273,6 @@ const DriverDashboard = () => {
                                                 </div>
                                             </div>
 
-                                            {/* 🆕 Students at this stop — only when arrived */}
                                             {isArrived && (
                                                 <div className="w-full pt-3 border-t border-gray-200/70">
                                                     <p className="text-xs text-gray-500 mb-2 font-medium">

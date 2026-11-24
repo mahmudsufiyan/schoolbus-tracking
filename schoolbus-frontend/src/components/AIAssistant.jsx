@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Bot, User, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import apiClient from '../api/axiosConfig'; // Make sure this path is correct
 
 const AIAssistant = ({ language = 'en' }) => {
     const [isOpen, setIsOpen] = useState(false);
@@ -9,7 +10,6 @@ const AIAssistant = ({ language = 'en' }) => {
     const [loading, setLoading] = useState(false);
     const messagesEndRef = useRef(null);
 
-    // Welcome message per language
     const welcome = {
         en: "Hi! I'm the Bright Future assistant. Ask me anything about our programs, bus routes, or enrollment.",
         am: "ሰላም! የብራይት ፊውቸር ረዳት ነኝ። ስለ ፕሮግራሞቻችን፣ የአውቶቡስ መስመሮች ወይም ምዝገባ ማንኛውንም ይጠይቁኝ።",
@@ -43,19 +43,14 @@ const AIAssistant = ({ language = 'en' }) => {
         setLoading(true);
 
         try {
-            const res = await fetch('http://localhost:5000/api/ai/ask', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    question,
-                    language,
-                    history: newMessages.slice(-6), // last 3 exchanges for context
-                }),
+            // FIX 2: Using apiClient so it hits your Render backend properly
+            const res = await apiClient.post('/ai/ask', {
+                question,
+                language,
+                history: newMessages.slice(-6),
             });
 
-            if (!res.ok) throw new Error('AI request failed');
-            const data = await res.json();
-            setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }]);
+            setMessages((prev) => [...prev, { role: 'assistant', content: res.data.answer }]);
         } catch (err) {
             setMessages((prev) => [
                 ...prev,
@@ -76,7 +71,6 @@ const AIAssistant = ({ language = 'en' }) => {
 
     return (
         <>
-            {/* Floating toggle button */}
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-2xl shadow-emerald-500/40 hover:scale-110 transition-all flex items-center justify-center"
@@ -85,7 +79,6 @@ const AIAssistant = ({ language = 'en' }) => {
                 {isOpen ? <X size={24} /> : <MessageCircle size={24} />}
             </button>
 
-            {/* Chat window */}
             <AnimatePresence>
                 {isOpen && (
                     <motion.div
@@ -95,7 +88,6 @@ const AIAssistant = ({ language = 'en' }) => {
                         transition={{ duration: 0.2 }}
                         className="fixed bottom-24 right-6 z-50 w-[calc(100vw-3rem)] max-w-sm h-[500px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden"
                     >
-                        {/* Header */}
                         <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-4 py-3 flex items-center gap-3">
                             <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
                                 <Bot size={20} />
@@ -106,25 +98,15 @@ const AIAssistant = ({ language = 'en' }) => {
                             </div>
                         </div>
 
-                        {/* Messages */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
                             {messages.map((msg, i) => (
-                                <div
-                                    key={i}
-                                    className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                                >
+                                <div key={i} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                     {msg.role === 'assistant' && (
                                         <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
                                             <Bot size={14} className="text-emerald-600" />
                                         </div>
                                     )}
-                                    <div
-                                        className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm ${
-                                            msg.role === 'user'
-                                                ? 'bg-emerald-600 text-white rounded-br-sm'
-                                                : 'bg-white text-gray-700 border border-gray-200 rounded-bl-sm'
-                                        }`}
-                                    >
+                                    <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-white text-gray-700 border border-gray-200 rounded-bl-sm'}`}>
                                         {msg.content}
                                     </div>
                                     {msg.role === 'user' && (
@@ -147,7 +129,6 @@ const AIAssistant = ({ language = 'en' }) => {
                             <div ref={messagesEndRef} />
                         </div>
 
-                        {/* Input */}
                         <div className="p-3 border-t border-gray-200 bg-white flex gap-2">
                             <input
                                 value={input}

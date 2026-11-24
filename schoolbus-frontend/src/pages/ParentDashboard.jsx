@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { LiveMap } from '../components/maps';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Bus, LogOut, Wifi, WifiOff, User, MapPin, Clock, Calendar,
@@ -10,8 +9,100 @@ import {
     Trash2, Settings, Info, Navigation, Save, KeyRound, Loader2,
 } from 'lucide-react';
 import apiClient from '../api/axiosConfig';
-import ParentAIChat from '../components/ParentAIChat';
+
+// ============================================================
+// LiveMap (inline — consistent with DriverDashboard)
+// ============================================================
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import RoutingLayer from '../components/maps/RoutingLayer';
 import ChatWidget from '../components/ChatWidget';
+
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+const LiveMap = ({ busId, stops, location, center, zoom, children }) => {
+    const mapRef = useRef(null);
+
+    useEffect(() => {
+        if (mapRef.current) {
+            setTimeout(() => {
+                mapRef.current?.invalidateSize();
+                if (location) {
+                    mapRef.current?.setView([location.latitude, location.longitude], zoom);
+                }
+            }, 100);
+        }
+    }, [location, zoom]);
+
+    const busIcon = L.divIcon({
+        html: `<div style="background:#2563eb;border-radius:50%;padding:6px;border:2px solid white;box-shadow:0 2px 10px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M5 18h14v-1H5v1zm0-2h14v-1H5v1zm0-2h14v-1H5v1zm4 4h6v-1H9v1z"/><path d="M17 5H7c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 10H7V7h10v8z"/></svg></div>`,
+        className: '',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+    });
+
+    const stopIcon = L.divIcon({
+        html: `<div style="background:#22c55e;border-radius:50%;padding:4px;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.2);"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="12" r="10"/></svg></div>`,
+        className: '',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+    });
+
+    const centerPos = location ? [location.latitude, location.longitude] : center;
+    const safeStops = Array.isArray(stops) ? stops.filter(s => s?.latitude && s?.longitude) : [];
+
+    return (
+        <MapContainer
+            ref={mapRef}
+            center={centerPos}
+            zoom={zoom}
+            style={{ height: '100%', width: '100%' }}
+        >
+            <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            {location && (
+                <Marker position={[location.latitude, location.longitude]} icon={busIcon}>
+                    <Popup>
+                        <strong>Child's Bus</strong><br />
+                        {busId ? `Bus #${busId}` : 'No bus assigned'}
+                        <br />
+                        Speed: {location.speed?.toFixed(1) || 0} km/h
+                    </Popup>
+                </Marker>
+            )}
+            {safeStops.map((stop) => (
+                <Marker key={stop.id} position={[stop.latitude, stop.longitude]} icon={stopIcon}>
+                    <Popup>
+                        <strong>{stop.stop_name}</strong><br />
+                        Stop #{stop.stop_order}
+                    </Popup>
+                </Marker>
+            ))}
+             {children}
+        </MapContainer>
+    );
+};
+
+// ============================================================
+// Helpers
+// ============================================================
+const normalizeTripStatus = (raw) => {
+    if (!raw) return null;
+    const s = String(raw).toLowerCase();
+    if (s === 'active' || s === 'in_progress' || s === 'in-progress') return 'in_progress';
+    if (s === 'completed' || s === 'ended' || s === 'done') return 'completed';
+    if (s === 'idle' || s === 'not_started') return 'idle';
+    return s;
+};
+
 const MENU_ITEMS = [
     { id: 'tracking',      label: 'Live Tracking',     icon: MapPin,   badge: null },
     { id: 'children',      label: 'My Children',       icon: Users,    badge: null },
@@ -21,6 +112,9 @@ const MENU_ITEMS = [
     { id: 'profile',       label: 'My Profile',        icon: User,     badge: null },
 ];
 
+// ============================================================
+// MAIN: ParentDashboard
+// ============================================================
 const ParentDashboard = () => {
     const { user, logout, updateUser } = useAuth();
     const { socket, isConnected, on, emit } = useSocket();
@@ -67,6 +161,9 @@ const ParentDashboard = () => {
 
     const unreadCount = notifications.filter(n => !n.read).length;
 
+    // ============================================================
+    // Stop banner helpers
+    // ============================================================
     const showStopBanner = useCallback((banner) => {
         const myChildNames = (banner.students || [])
             .filter(s =>
@@ -112,6 +209,9 @@ const ParentDashboard = () => {
         setStopBanner(null);
     };
 
+    // ============================================================
+    // Data fetchers
+    // ============================================================
     const fetchChildren = useCallback(async () => {
         setLoading(true);
         try {
@@ -123,7 +223,7 @@ const ParentDashboard = () => {
                 const first = list[0];
                 setSelectedChildId(prev => prev ?? first.id);
                 setSelectedChild(first);
-                setTripStatus(first.trip_status || null);
+                setTripStatus(normalizeTripStatus(first.trip_status));
                 if (first.bus_id) {
                     try {
                         const s = await apiClient.get(`/buses/${first.bus_id}/stops`);
@@ -256,12 +356,15 @@ const ParentDashboard = () => {
         } finally { setPwSaving(false); }
     };
 
+    // ============================================================
+    // Effects
+    // ============================================================
     useEffect(() => { fetchChildren(); fetchNotifications(); }, [fetchChildren, fetchNotifications]);
 
     useEffect(() => {
         const child = children.find(c => c.id === selectedChildId);
         setSelectedChild(child || null);
-        setTripStatus(child?.trip_status || null);
+        setTripStatus(normalizeTripStatus(child?.trip_status));
         setBusLocation(null);
 
         if (child?.bus_id) {
@@ -282,13 +385,34 @@ const ParentDashboard = () => {
         if (activeView === 'notifications') fetchNotifications();
     }, [activeView, fetchTripHistory, fetchContacts, fetchProfile, fetchNotifications]);
 
+    // 1. Setup socket connection ONCE (No selectedChild here!)
     useEffect(() => {
         if (!socket || !isConnected || !user?.id) return;
+
         emit('join-parent-room', user.id);
+
         const unsubJoined = on('joined-rooms', r => console.log('✅ joined rooms', r));
         const unsubAuth   = on('authenticated',  d => console.log('✅ socket auth', d));
-        return () => { unsubJoined?.(); unsubAuth?.(); };
-    }, [socket, isConnected, user, emit, on]);
+
+        return () => {
+            unsubJoined?.();
+            unsubAuth?.();
+        };
+    }, [socket, isConnected, user?.id, emit, on]);
+
+    // 2. Join the specific bus room ONLY when the child changes
+    useEffect(() => {
+        if (!socket || !isConnected || !selectedChild?.bus_id) return;
+
+        emit('join-bus-room', selectedChild.bus_id);
+        console.log(`🚌 Parent successfully joined bus room: bus-${selectedChild.bus_id}`);
+
+        return () => {
+            if (socket) {
+                socket.emit('leave-bus-room', selectedChild.bus_id);
+            }
+        };
+    }, [socket, isConnected, selectedChild?.bus_id, emit]);
 
     useEffect(() => {
         if (!socket) return;
@@ -314,7 +438,19 @@ const ParentDashboard = () => {
                 timestamp: data.timestamp,
             });
         });
-        const unsubScan = on('student-scanned', () => fetchNotifications());
+
+        const unsubScanned = on('student-scanned', (data) => {
+            console.log('📷 Parent heard student-scanned:', data);
+            setStudentStatus(prev => ({
+                ...prev,
+                [data.student_id]: {
+                    ...(prev[data.student_id] || {}),
+                    boarded_at: data.timestamp || new Date().toISOString(),
+                    stop_name: data.stop_name,
+                },
+            }));
+            fetchNotifications();
+        });
 
         const unsubApproach = on('stop-approaching', (data) => {
             console.log('📢 Parent heard stop-approaching:', data);
@@ -386,19 +522,32 @@ const ParentDashboard = () => {
             }));
         });
 
+        const unsubDriverAssigned = on('driver-assigned', () => {
+            fetchChildren();
+            fetchDriverInfo();
+        });
+        const unsubBusUpdated = on('bus-updated', () => {
+            fetchChildren();
+        });
+
         return () => {
             unsubStarted?.();
             unsubEnded?.();
             unsubLoc?.();
-            unsubScan?.();
+            unsubScanned?.();
             unsubApproach?.();
             unsubStopArrived?.();
             unsubPickedUp?.();
             unsubDroppedOff?.();
             unsubConfirmed?.();
+            unsubDriverAssigned?.();
+            unsubBusUpdated?.();
         };
-    }, [socket, on, fetchNotifications, fetchTripHistory, activeView, showStopBanner]);
+    }, [socket, on, fetchNotifications, fetchTripHistory, fetchChildren, fetchDriverInfo, activeView, showStopBanner]);
 
+    // ============================================================
+    // Formatting helpers
+    // ============================================================
     const formatDateTime = (d) => {
         try {
             return new Date(d).toLocaleString('en-US', {
@@ -415,6 +564,9 @@ const ParentDashboard = () => {
         return `${Math.floor(mins / 60)}h ${mins % 60}m`;
     };
 
+    // ============================================================
+    // Confirm receipt (parent confirms child received)
+    // ============================================================
     const confirmReceipt = async (studentId) => {
         const st = studentStatus[studentId];
         if (!st?.event_id) {
@@ -432,15 +584,19 @@ const ParentDashboard = () => {
                     confirmed_at: res.data.event.parent_confirmed_at,
                 },
             }));
+            dismissStopBanner();
         } catch (err) {
             setError(err.response?.data?.message || 'Failed to confirm');
         }
     };
 
+    // ============================================================
+    // RENDER: Tracking
+    // ============================================================
     const renderTracking = () => (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 overflow-hidden">
-                <div className="h-80 lg:h-[500px]">
+                <div className="h-80 lg:h-[500px] relative">
                     <LiveMap
                         busId={selectedChild?.bus_id}
                         stops={stops}
@@ -449,7 +605,18 @@ const ParentDashboard = () => {
                             ? [busLocation.latitude, busLocation.longitude]
                             : [9.0320, 38.7469]}
                         zoom={14}
-                    />
+                    >
+                        <RoutingLayer
+                            location={busLocation || { latitude: 9.0320, longitude: 38.7469 }}
+                            stops={stops}
+                            stopsToRoute={
+                                selectedChild?.stop_id
+                                    ? stops.filter(s => s.id === selectedChild.stop_id)
+                                    : stops
+                            }
+                            autoShow={false}
+                        />
+                    </LiveMap>
                 </div>
                 <div className="p-4 border-t flex flex-wrap gap-3 items-center justify-between">
                     <div className="flex items-center gap-3 text-sm">
@@ -475,6 +642,25 @@ const ParentDashboard = () => {
             </div>
 
             <div className="space-y-4">
+                {children.length > 1 && (
+                    <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-4">
+                        <label className="text-xs font-semibold text-gray-500 uppercase">
+                            Active Child
+                        </label>
+                        <select
+                            value={selectedChildId || ''}
+                            onChange={e => setSelectedChildId(Number(e.target.value))}
+                            className="w-full mt-1 px-3 py-2 border rounded-xl text-sm bg-white"
+                        >
+                            {children.map(c => (
+                                <option key={c.id} value={c.id}>
+                                    {c.full_name} — {c.bus_number || 'No bus'}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
+
                 <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-4">
                     <h3 className="text-lg font-semibold text-gray-700 flex items-center gap-2 mb-3">
                         <User size={20} className="text-green-600" /> Student
@@ -513,6 +699,8 @@ const ParentDashboard = () => {
                                         ? 'bg-blue-50 border-blue-200'
                                     : studentStatus[selectedChild.id].picked_up_at
                                         ? 'bg-green-50 border-green-200'
+                                        : studentStatus[selectedChild.id].boarded_at
+                                        ? 'bg-yellow-50 border-yellow-200'
                                         : 'bg-gray-50 border-gray-200'
                                 }`}>
                                     <p className="text-xs text-gray-500 mb-1">Child status</p>
@@ -523,8 +711,19 @@ const ParentDashboard = () => {
                                             ? `🚏 Dropped off — awaiting your confirmation`
                                         : studentStatus[selectedChild.id].picked_up_at
                                             ? `🟢 On the bus — picked up at ${new Date(studentStatus[selectedChild.id].picked_up_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+                                        : studentStatus[selectedChild.id].boarded_at
+                                            ? `📷 Boarded bus at ${new Date(studentStatus[selectedChild.id].boarded_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
                                             : ''}
                                     </p>
+                                    {studentStatus[selectedChild.id].dropped_off_at &&
+                                     !studentStatus[selectedChild.id].confirmed_at && (
+                                        <button
+                                            onClick={() => confirmReceipt(selectedChild.id)}
+                                            className="mt-2 w-full py-2 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 flex items-center justify-center gap-1"
+                                        >
+                                            <CheckCircle size={14} /> Confirm Receipt
+                                        </button>
+                                    )}
                                 </div>
                             )}
 
@@ -603,6 +802,9 @@ const ParentDashboard = () => {
         </div>
     );
 
+    // ============================================================
+    // RENDER: Children
+    // ============================================================
     const renderChildren = () => (
         <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -647,11 +849,11 @@ const ParentDashboard = () => {
                                             </span>
                                         )}
                                         <span className={`px-2 py-1 rounded-full ${
-                                            child.trip_status === 'in_progress'
+                                            normalizeTripStatus(child.trip_status) === 'in_progress'
                                                 ? 'bg-green-100 text-green-700'
                                                 : 'bg-gray-100 text-gray-600'
                                         }`}>
-                                            {child.trip_status === 'in_progress' ? '🟢 On Route' : '⏸️ Idle'}
+                                            {normalizeTripStatus(child.trip_status) === 'in_progress' ? '🟢 On Route' : '⏸️ Idle'}
                                         </span>
                                     </div>
                                 </div>
@@ -668,6 +870,9 @@ const ParentDashboard = () => {
         </div>
     );
 
+    // ============================================================
+    // RENDER: Notifications
+    // ============================================================
     const renderNotifications = () => (
         <div className="space-y-4 max-w-3xl mx-auto">
             <div className="flex items-center justify-between">
@@ -736,6 +941,9 @@ const ParentDashboard = () => {
         </div>
     );
 
+    // ============================================================
+    // RENDER: History
+    // ============================================================
     const renderHistory = () => (
         <div className="space-y-4 max-w-3xl mx-auto">
             <div className="flex items-center justify-between">
@@ -863,6 +1071,9 @@ const ParentDashboard = () => {
         </div>
     );
 
+    // ============================================================
+    // RENDER: Contact
+    // ============================================================
     const renderContact = () => {
         if (contactsLoading) return (
             <div className="flex justify-center py-12">
@@ -980,6 +1191,9 @@ const ParentDashboard = () => {
         );
     };
 
+    // ============================================================
+    // RENDER: Profile
+    // ============================================================
     const renderProfile = () => {
         if (profileLoading && !profile) return (
             <div className="flex justify-center py-12">
@@ -1103,6 +1317,9 @@ const ParentDashboard = () => {
         );
     };
 
+    // ============================================================
+    // Router
+    // ============================================================
     const renderActiveView = () => {
         switch (activeView) {
             case 'tracking':      return renderTracking();
@@ -1115,6 +1332,9 @@ const ParentDashboard = () => {
         }
     };
 
+    // ============================================================
+    // Loading screen
+    // ============================================================
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-green-50">
@@ -1126,6 +1346,9 @@ const ParentDashboard = () => {
         );
     }
 
+    // ============================================================
+    // Main layout
+    // ============================================================
     return (
         <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-50 flex">
             <button onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -1138,159 +1361,111 @@ const ParentDashboard = () => {
             } lg:relative lg:translate-x-0 lg:block flex-shrink-0`}>
                 <div className="flex flex-col h-full p-4">
                     <div className="flex items-center gap-3 mb-6 px-2 pt-4 lg:pt-0">
-                        <div className="bg-green-500 p-2 rounded-xl">
+                        <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-2 rounded-xl">
                             <Bus size={22} className="text-white" />
                         </div>
                         <div>
                             <h1 className="text-white font-bold text-lg">SchoolBus</h1>
-                            <p className="text-xs text-green-300">Parent Panel</p>
+                            <p className="text-xs text-emerald-300/70">Parent Panel</p>
                         </div>
                     </div>
 
                     <div className="bg-white/5 rounded-xl p-4 mb-6">
                         <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center text-white font-bold text-lg">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center text-white font-bold text-lg">
                                 {user?.full_name?.charAt(0) || 'P'}
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-white font-semibold truncate">{user?.full_name || 'Parent'}</p>
                                 <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+                                <span className={`text-xs ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
+                                    {isConnected ? '🟢 Connected' : '🔴 Offline'}
+                                </span>
                             </div>
                         </div>
                     </div>
 
                     <nav className="flex-1 space-y-1">
-                        {MENU_ITEMS.map(item => {
-                            const isActive = activeView === item.id;
-                            const badgeCount = item.badge === 'unread' ? unreadCount : 0;
-                            return (
-                                <button key={item.id}
-                                        onClick={() => { setActiveView(item.id); setSidebarOpen(false); }}
-                                        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl ${
-                                            isActive
-                                                ? 'bg-green-600/30 text-white border border-green-500/30'
-                                                : 'text-gray-400 hover:text-white hover:bg-white/5'
-                                        }`}>
-                                    <item.icon size={18} />
-                                    <span className="text-sm flex-1 text-left">{item.label}</span>
-                                    {badgeCount > 0 && (
-                                        <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-xs">
-                                            {badgeCount}
-                                        </span>
-                                    )}
-                                </button>
-                            );
-                        })}
+                        <div className="text-xs text-gray-500 uppercase tracking-wider px-2 mb-2">Menu</div>
+                        {MENU_ITEMS.map((item) => (
+                            <button
+                                key={item.id}
+                                onClick={() => { setActiveView(item.id); setSidebarOpen(false); }}
+                                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 ${
+                                    activeView === item.id
+                                        ? 'bg-gradient-to-r from-green-600/20 to-emerald-600/20 text-white border border-green-500/20'
+                                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                }`}
+                            >
+                                <item.icon size={18} />
+                                <span className="text-sm font-medium flex-1 text-left">{item.label}</span>
+                                {item.badge === 'unread' && unreadCount > 0 && (
+                                    <span className="px-2 py-0.5 bg-red-500 text-white rounded-full text-xs">
+                                        {unreadCount}
+                                    </span>
+                                )}
+                            </button>
+                        ))}
                     </nav>
 
-                    <button onClick={logout}
-                            className="flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 mt-4 border-t border-white/10 pt-4">
+                    <button
+                        onClick={logout}
+                        className="flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 transition-all duration-300 mt-4 border-t border-white/10 pt-4"
+                    >
                         <LogOut size={18} />
-                        <span className="text-sm">Logout</span>
+                        <span className="text-sm font-medium">Logout</span>
                     </button>
                 </div>
             </aside>
 
             <main className="flex-1 min-h-screen overflow-hidden">
-                <header className="sticky top-0 z-30 bg-white/60 backdrop-blur-xl border-b p-3 flex justify-between items-center">
-                    <h2 className="text-lg font-semibold text-gray-700 hidden sm:block">
-                        {MENU_ITEMS.find(m => m.id === activeView)?.label}
-                    </h2>
-                    <div className="flex items-center gap-3">
-                        <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs ${
-                            isConnected ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                        }`}>
-                            {isConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
-                            {isConnected ? 'Connected' : 'Offline'}
+                <header className="sticky top-0 z-30 bg-white/60 backdrop-blur-xl border-b border-white/50 shadow-sm">
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <h2 className="text-lg font-semibold text-gray-700 hidden sm:block">
+                                👨‍👩‍👧 Parent Dashboard
+                            </h2>
+                            {unreadCount > 0 && (
+                                <button onClick={() => setActiveView('notifications')}
+                                        className="relative p-2 rounded-xl hover:bg-gray-100/70">
+                                    <Bell size={18} className="text-gray-600" />
+                                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center">
+                                        {unreadCount}
+                                    </span>
+                                </button>
+                            )}
                         </div>
-                        {['tracking', 'history', 'contact'].includes(activeView) && children.length > 0 && (
-                            <select value={selectedChildId || ''}
-                                    onChange={(e) => setSelectedChildId(e.target.value)}
-                                    className="px-3 py-1.5 bg-white border rounded-xl text-sm">
-                                {children.map(c => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.full_name} ({c.bus_number || 'N/A'})
-                                    </option>
-                                ))}
-                            </select>
-                        )}
+
+                        <div className="flex items-center gap-3">
+                            <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
+                                isConnected ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'
+                            }`}>
+                                {isConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
+                                {isConnected ? 'Live' : 'Offline'}
+                            </div>
+
+                            <button
+                                onClick={logout}
+                                className="p-2 rounded-xl hover:bg-gray-100/70 transition text-gray-600 lg:hidden"
+                            >
+                                <LogOut size={18} />
+                            </button>
+                        </div>
                     </div>
                 </header>
 
                 <div className="p-4 lg:p-6">
                     {error && (
-                        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex gap-2">
+                        <div className="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded-xl flex items-center gap-2">
                             <AlertTriangle size={18} />
                             <span>{error}</span>
-                            <button onClick={() => setError('')} className="ml-auto"><X size={16} /></button>
+                            <button onClick={() => setError('')} className="ml-auto text-yellow-500 hover:text-yellow-700">
+                                <X size={16} />
+                            </button>
                         </div>
                     )}
 
-                    <AnimatePresence>
-                        {activeView === 'tracking' && stopBanner && (
-                            <motion.div
-                                initial={{ opacity: 0, y: -10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -10 }}
-                                className={`mb-4 px-4 py-4 rounded-xl flex flex-col sm:flex-row sm:items-center gap-3 shadow-lg ${
-                                    stopBanner.type === 'arrived'
-                                        ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white border-2 border-emerald-600'
-                                    : stopBanner.type === 'dropped_off'
-                                        ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white border-2 border-blue-600'
-                                    : 'bg-gradient-to-r from-yellow-400 to-orange-400 text-white border-2 border-yellow-500'
-                                }`}>
-                                <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <div className="flex-shrink-0">
-                                        <div className="w-10 h-10 rounded-full bg-white/25 flex items-center justify-center">
-                                            <span className="text-xl">
-                                                {stopBanner.type === 'arrived' ? '📍' :
-                                                 stopBanner.type === 'dropped_off' ? '✅' : '📢'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="font-bold text-sm sm:text-base">
-                                            {stopBanner.type === 'arrived'
-                                                ? `Bus at ${stopBanner.stopName}`
-                                                : stopBanner.type === 'dropped_off'
-                                                    ? `${stopBanner.childNames} dropped off at ${stopBanner.stopName}`
-                                                    : `Approaching ${stopBanner.stopName}`}
-                                        </p>
-                                        <p className="text-xs sm:text-sm opacity-90">
-                                            {stopBanner.type === 'arrived'
-                                                ? `Please come out for ${stopBanner.childNames}`
-                                                : stopBanner.type === 'dropped_off'
-                                                    ? 'Please confirm you received them below.'
-                                                    : `~2 minutes away — get ready for ${stopBanner.childNames}`}
-                                        </p>
-
-                                        {stopBanner.type === 'dropped_off' && stopBanner.studentId && (
-                                            <>
-                                                {studentStatus[stopBanner.studentId]?.confirmed_at ? (
-                                                    <p className="text-xs mt-2 bg-white/20 rounded-lg px-3 py-1.5 inline-block font-medium">
-                                                        ✅ Confirmed at {new Date(studentStatus[stopBanner.studentId].confirmed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                                                    </p>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => confirmReceipt(stopBanner.studentId)}
-                                                        className="mt-2 px-4 py-2 bg-white text-blue-700 font-semibold rounded-lg text-sm hover:bg-blue-50 transition shadow-sm">
-                                                        ✅ I received {stopBanner.childNames}
-                                                    </button>
-                                                )}
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={dismissStopBanner}
-                                    className="flex-shrink-0 self-start sm:self-center p-1.5 rounded-lg hover:bg-white/20 transition"
-                                    aria-label="Dismiss">
-                                    <X size={18} />
-                                </button>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-
+                    {/* 🆕 THE GREEN BANNER GOES HERE */}
                     {activeView === 'tracking' && !stopBanner && tripStatus === 'in_progress' && (
                         (() => {
                             const myChild = selectedChild;
@@ -1335,21 +1510,63 @@ const ParentDashboard = () => {
                         </div>
                     )}
 
-                    <AnimatePresence mode="wait">
-                        <motion.div key={activeView}
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -10 }}
-                                    transition={{ duration: 0.2 }}>
-                            {renderActiveView()}
-                        </motion.div>
-                    </AnimatePresence>
+                    {renderActiveView()}
                 </div>
             </main>
 
-            {/* 🆕 AI Chat Widget — already wired up */}
-            <ParentAIChat />
-            {/* 🆕 Parent-Admin Chat Widget */}
+            <AnimatePresence>
+                {stopBanner && (
+                    <motion.div
+                        initial={{ y: -100, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: -100, opacity: 0 }}
+                        className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[95vw] max-w-md"
+                    >
+                        <div className={`rounded-2xl shadow-2xl p-4 border-l-4 ${
+                            stopBanner.type === 'approaching' ? 'bg-orange-50 border-orange-500' :
+                            stopBanner.type === 'arrived'    ? 'bg-purple-50 border-purple-500' :
+                            stopBanner.type === 'dropped_off' ? 'bg-blue-50 border-blue-500' :
+                            'bg-white border-gray-300'
+                        }`}>
+                            <div className="flex items-start gap-3">
+                                <div className={`p-2 rounded-full flex-shrink-0 ${
+                                    stopBanner.type === 'approaching' ? 'bg-orange-500' :
+                                    stopBanner.type === 'arrived'    ? 'bg-purple-500' :
+                                    'bg-blue-500'
+                                }`}>
+                                    <Bell size={18} className="text-white" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-gray-800">
+                                        {stopBanner.type === 'approaching' && '📢 Bus is approaching'}
+                                        {stopBanner.type === 'arrived' && '📍 Bus has arrived'}
+                                        {stopBanner.type === 'dropped_off' && '🚏 Child dropped off'}
+                                    </p>
+                                    <p className="text-sm text-gray-600 mt-0.5">
+                                        {stopBanner.stopName && `📍 ${stopBanner.stopName}`}
+                                    </p>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {stopBanner.childNames}
+                                    </p>
+                                    {stopBanner.type === 'dropped_off' && stopBanner.studentId && (
+                                        <button
+                                            onClick={() => confirmReceipt(stopBanner.studentId)}
+                                            className="mt-2 w-full py-2 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 flex items-center justify-center gap-1"
+                                        >
+                                            <CheckCircle size={14} /> Confirm Receipt
+                                        </button>
+                                    )}
+                                </div>
+                                <button onClick={dismissStopBanner}
+                                        className="p-1 hover:bg-gray-200/50 rounded">
+                                    <X size={16} className="text-gray-500" />
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             <ChatWidget />
         </div>
     );
