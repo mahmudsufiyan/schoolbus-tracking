@@ -211,16 +211,51 @@ router.put('/:id', verifyToken, checkRole(['admin', 'parent']), async (req, res)
 });
 
 // =============================================
-// ADMIN: DELETE student
+// ADMIN: DELETE student AND automatically delete linked parent
 // =============================================
 router.delete('/:id', verifyToken, checkRole(['admin']), async (req, res) => {
     const { id } = req.params;
+    const client = await pool.connect();
+
     try {
-        const result = await pool.query('DELETE FROM students WHERE id = $1 RETURNING *', [id]);
-        if (result.rows.length === 0) return res.status(404).json({ message: 'Student not found' });
-        res.json({ success: true, message: 'Student deleted' });
+        await client.query('BEGIN');
+
+        // 1. Find the student to get the parent_id
+        const studentRes = await client.query(
+            'SELECT parent_id, full_name FROM students WHERE id = $1',
+            [id]
+        );
+
+        if (studentRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Student not found' });
+        }
+
+        const parentId = studentRes.rows[0].parent_id;
+
+        // 2. Delete the student
+        await client.query('DELETE FROM students WHERE id = $1', [id]);
+
+        // 3. If a parent was linked, delete them too
+        if (parentId) {
+            // Delete the parent user
+            await client.query('DELETE FROM users WHERE id = $1 AND role = $2', [parentId, 'parent']);
+            
+            // Clean up any pending registrations just in case
+            await client.query('DELETE FROM parent_registrations WHERE user_id = $1', [parentId]);
+            
+            console.log(`✅ Deleted student ${studentRes.rows[0].full_name} and their linked parent (ID: ${parentId})`);
+        }
+
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Student and linked parent deleted successfully' });
+
     } catch (error) {
-        res.status(500).json({ message: 'Server error' });
+        await client.query('ROLLBACK');
+        console.error('❌ DELETE /students/:id error:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    } finally {
+        client.release();
     }
 });
 
