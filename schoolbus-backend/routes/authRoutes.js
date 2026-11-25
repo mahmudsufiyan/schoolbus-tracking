@@ -24,7 +24,7 @@ router.post('/register', async (req, res) => {
         student_name,
         student_grade,
         student_school,
-        student_id_number,
+        student_id_number, // 🆕 We need this!
         badge_number,
         station,
         license_number,
@@ -97,53 +97,96 @@ router.post('/register', async (req, res) => {
             });
         }
 
-        // 📥 Non-Admin: Insert user with is_approved = false
+        // ============================================================
+        // 🆕 PARENT REGISTRATION: STRICT VALIDATION
+        // ============================================================
+        if (role === 'parent' || !role) {
+            if (!student_id_number) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Student ID number is required to register a parent account.'
+                });
+            }
+
+            // 1. Check if the student exists in the database
+            const studentCheck = await pool.query(
+                'SELECT id, full_name FROM students WHERE student_id_number = $1',
+                [student_id_number]
+            );
+
+            if (studentCheck.rows.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Student ID not found. Please ask the school admin to register your child first.'
+                });
+            }
+
+            const studentId = studentCheck.rows[0].id;
+
+            // 2. Create the Parent (Auto-approved so they can log in immediately)
+            const result = await pool.query(
+                `INSERT INTO users (
+                    full_name, email, password_hash, phone, role, 
+                    address, date_of_birth, gender, occupation, 
+                    emergency_contact, relationship_to_student,
+                    profile_image, is_approved, is_active
+                 ) VALUES ($1, $2, $3, $4, 'parent', $5, $6, $7, $8, $9, $10, $11, true, true)
+                 RETURNING id, full_name, email, phone, role, created_at`,
+                [
+                    full_name, email, hashedPassword, phone,
+                    address || null, date_of_birth || null, gender || null,
+                    occupation || null, emergency_contact || null,
+                    relationship_to_student || null, profile_image || null
+                ]
+            );
+
+            const user = result.rows[0];
+
+            // 3. Link the parent to the student
+            await pool.query(
+                'UPDATE students SET parent_id = $1 WHERE id = $2',
+                [user.id, studentId]
+            );
+
+            const token = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                process.env.JWT_SECRET,
+                { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+            );
+
+            console.log(`✅ [REGISTER] Parent auto-approved and linked to student ${studentId}`);
+
+            return res.status(201).json({
+                success: true,
+                token,
+                user,
+                message: '✅ Registration successful! You are now linked to your child.'
+            });
+        }
+
+        // ============================================================
+        // 🆕 OTHER ROLES (Driver, Police) - Stay Pending
+        // ============================================================
         const result = await pool.query(
             `INSERT INTO users (
                 full_name, email, password_hash, phone, role, 
                 address, date_of_birth, gender, occupation, 
                 emergency_contact, relationship_to_student,
-                profile_image,
-                badge_number,
-                station,
-                license_number,
-                experience,
+                profile_image, badge_number, station, license_number, experience,
                 is_approved
              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, false)
              RETURNING id, full_name, email, phone, role, created_at`,
             [
-                full_name, email, hashedPassword, phone, role || 'parent',
+                full_name, email, hashedPassword, phone, role,
                 address || null, date_of_birth || null, gender || null,
                 occupation || null, emergency_contact || null,
-                relationship_to_student || null,
-                profile_image || null,
-                badge_number || null,
-                station || null,
-                license_number || null,
-                experience || null
+                relationship_to_student || null, profile_image || null,
+                badge_number || null, station || null,
+                license_number || null, experience || null
             ]
         );
 
         const user = result.rows[0];
-
-        // 📥 Insert into parent_registrations for admin review (only for parents)
-        if (role === 'parent' || role === null) {
-            await pool.query(
-                `INSERT INTO parent_registrations (
-                    user_id, full_name, email, phone, address,
-                    date_of_birth, gender, occupation, emergency_contact,
-                    relationship_to_student, student_name, student_grade,
-                    student_school, student_id_number, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending')`,
-                [
-                    user.id, full_name, email, phone, address || null,
-                    date_of_birth || null, gender || null, occupation || null,
-                    emergency_contact || null, relationship_to_student || null,
-                    student_name || null, student_grade || null,
-                    student_school || null, student_id_number || null
-                ]
-            );
-        }
 
         console.log('✅ [REGISTER] User created (pending approval):', user.id);
 
@@ -259,7 +302,7 @@ router.post('/login', async (req, res) => {
                 success: false,
                 pending: true,
                 message: status === 'pending' 
-                    ? '⏳ Account pending approval. Please wait for admin approval.'
+                    ? '⏳ Account pending approval. Please wait for admin approval.' 
                     : '❌ Account has been rejected. Please contact admin.',
                 status: status,
                 submitted_at: createdAt

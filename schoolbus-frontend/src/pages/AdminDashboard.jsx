@@ -1764,11 +1764,11 @@ const AdminDashboard = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Student ID</label>
-                            <input type="text" value={formData.student_id_number || ''}
-                                onChange={(e) => setFormData({ ...formData, student_id_number: e.target.value })}
-                                className="w-full px-4 py-2 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white" />
-                        </div>
+    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Student ID * (Required for Parent link)</label>
+    <input type="text" required value={formData.student_id_number || ''}
+        onChange={(e) => setFormData({ ...formData, student_id_number: e.target.value })}
+        className="w-full px-4 py-2 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white" />
+</div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Parent ID</label>
                             <input type="text" value={formData.parent_id || ''}
