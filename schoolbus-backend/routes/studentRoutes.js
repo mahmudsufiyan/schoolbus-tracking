@@ -184,28 +184,35 @@ router.post('/', verifyToken, checkRole(['admin', 'parent']), async (req, res) =
 });
 
 // =============================================
-// ADMIN: PUT update student
+// ADMIN: PUT update student (FIXED TO SAVE BUS ID)
 // =============================================
 router.put('/:id', verifyToken, checkRole(['admin', 'parent']), async (req, res) => {
     const { id } = req.params;
     const { full_name, grade, school_name, bus_id, stop_id, student_id_number } = req.body;
+    
     try {
+        // Ensure empty strings are saved as null, and valid IDs are saved as numbers
+        const finalBusId = (bus_id === '' || bus_id === undefined) ? null : parseInt(bus_id);
+        const finalStopId = (stop_id === '' || stop_id === undefined) ? null : parseInt(stop_id);
+
         const result = await pool.query(
             `UPDATE students 
              SET full_name = COALESCE($1, full_name),
                  grade = COALESCE($2, grade),
                  school_name = COALESCE($3, school_name),
-                 bus_id = COALESCE($4, bus_id),
-                 stop_id = COALESCE($5, stop_id),
+                 bus_id = $4,     
+                 stop_id = $5,    
                  student_id_number = COALESCE($6, student_id_number),
                  updated_at = NOW()
              WHERE id = $7
              RETURNING *`,
-            [full_name, grade, school_name, bus_id, stop_id, student_id_number, id]
+            [full_name, grade, school_name, finalBusId, finalStopId, student_id_number, id]
         );
+        
         if (result.rows.length === 0) return res.status(404).json({ message: 'Student not found' });
         res.json({ success: true, student: result.rows[0] });
     } catch (error) {
+        console.error('Error updating student:', error);
         res.status(500).json({ message: 'Server error' });
     }
 });
@@ -238,12 +245,8 @@ router.delete('/:id', verifyToken, checkRole(['admin']), async (req, res) => {
 
         // 3. If a parent was linked, delete them too
         if (parentId) {
-            // Delete the parent user
             await client.query('DELETE FROM users WHERE id = $1 AND role = $2', [parentId, 'parent']);
-            
-            // Clean up any pending registrations just in case
             await client.query('DELETE FROM parent_registrations WHERE user_id = $1', [parentId]);
-            
             console.log(`✅ Deleted student ${studentRes.rows[0].full_name} and their linked parent (ID: ${parentId})`);
         }
 
@@ -344,14 +347,19 @@ router.post('/scan', verifyToken, checkRole(['driver']), async (req, res) => {
         const student = studentResult.rows[0];
 
         let rejectReason = null;
+        
+        // 🆕 CRITICAL FIX: Convert both to Numbers before comparing
+        const studentBusId = student.bus_id ? Number(student.bus_id) : null;
+        const driverBusId = Number(bus.id);
+
         if (student.is_active === false) {
             rejectReason = 'Student account is inactive';
         } else if (student.qr_token_expires && new Date(student.qr_token_expires) < new Date()) {
             rejectReason = 'Card has expired';
-        } else if (!student.bus_id) {
+        } else if (!studentBusId) {
             rejectReason = 'Student is not assigned to any bus';
-        } else if (student.bus_id !== bus.id) {
-            rejectReason = 'Student belongs to a different bus';
+        } else if (studentBusId !== driverBusId) {
+            rejectReason = `Student belongs to a different bus (Bus ID: ${studentBusId})`;
         }
 
         const scanResult = await client.query(
