@@ -1505,16 +1505,23 @@ const AdminDashboard = () => {
         );
     };
 
-    const renderUserDetailModal = () => {
+       const renderUserDetailModal = () => {
         if (!selectedUserForDetail) return null;
         const u = selectedUserForDetail;
 
-        // 🆕 Find the matching registration to guarantee student details show up
+        // 🆕 Look up the registration data for this specific user
         const registration = registrations.find(r => String(r.user_id) === String(u.id));
-        const studentName = u.student_name || u.pending_student_name || registration?.student_name || '--';
-        const studentGrade = u.student_grade || u.pending_student_grade || registration?.student_grade || '--';
-        const studentSchool = u.student_school || u.pending_student_school || registration?.student_school || '--';
-        const studentId = u.student_id_number || u.pending_student_id_number || registration?.student_id_number || '--';
+        
+        // 🆕 Helper function: Check User table -> Registration table -> Pending fields -> Fallback
+        const getVal = (field) => {
+            if (u[field]) return u[field];
+            if (registration && registration[field]) return registration[field];
+            if (u[`pending_${field}`]) return u[`pending_${field}`];
+            return '--';
+        };
+
+        // Handle Date of Birth separately for formatting
+        const dobValue = u.date_of_birth || registration?.date_of_birth;
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1558,16 +1565,19 @@ const AdminDashboard = () => {
                                     <GraduationCap size={18} className="text-blue-600" /> Parent / Student Details
                                 </h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <DetailItem label="Relationship to Student" value={u.relationship_to_student || registration?.relationship_to_student || '--'} />
-                                    <DetailItem label="Student Name" value={studentName} />
-                                    <DetailItem label="Student Grade" value={studentGrade} />
-                                    <DetailItem label="Student School" value={studentSchool} />
-                                    <DetailItem label="Student ID" value={studentId} />
-                                    <DetailItem label="Address" value={u.address || registration?.address || '--'} />
-                                    <DetailItem label="Date of Birth" value={u.date_of_birth ? new Date(u.date_of_birth).toLocaleDateString() : (registration?.date_of_birth ? new Date(registration.date_of_birth).toLocaleDateString() : '--')} />
-                                    <DetailItem label="Gender" value={u.gender || registration?.gender || '--'} />
-                                    <DetailItem label="Occupation" value={u.occupation || registration?.occupation || '--'} />
-                                    <DetailItem label="Emergency Contact" value={u.emergency_contact || registration?.emergency_contact || '--'} />
+                                    <DetailItem label="Relationship to Student" value={getVal('relationship_to_student')} />
+                                    <DetailItem label="Date of Birth" value={dobValue ? new Date(dobValue).toLocaleDateString() : '--'} />
+                                    <DetailItem label="Gender" value={getVal('gender')} />
+                                    <DetailItem label="Occupation" value={getVal('occupation')} />
+                                    <DetailItem label="Emergency Contact" value={getVal('emergency_contact')} />
+                                    <DetailItem label="Address" value={getVal('address')} />
+                                    
+                                    <div className="col-span-full border-t border-gray-100 dark:border-slate-700/50 my-1"></div>
+                                    
+                                    <DetailItem label="Student Name" value={getVal('student_name')} />
+                                    <DetailItem label="Student Grade" value={getVal('student_grade')} />
+                                    <DetailItem label="Student School" value={getVal('student_school')} />
+                                    <DetailItem label="Student ID" value={getVal('student_id_number')} />
                                 </div>
                             </div>
                         )}
@@ -1613,7 +1623,6 @@ const AdminDashboard = () => {
             </div>
         );
     };
-
     const DetailItem = ({ label, value }) => (
         <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-2">
             <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
