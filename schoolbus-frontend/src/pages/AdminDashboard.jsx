@@ -610,7 +610,7 @@ const AdminDashboard = () => {
         }
     };
 
-    const handleSubmitStudent = async (e) => {
+        const handleSubmitStudent = async (e) => {
         e.preventDefault();
         setFormLoading(true);
         setFormError('');
@@ -619,8 +619,9 @@ const AdminDashboard = () => {
                 ...formData,
                 grade: formData.grade || null,
                 school_name: formData.school_name || null,
-                bus_id: formData.bus_id || null,
-                stop_id: formData.stop_id || null,
+                // 🆕 FORCE NUMBER CONVERSION HERE
+                bus_id: formData.bus_id ? parseInt(formData.bus_id) : null,
+                stop_id: formData.stop_id ? parseInt(formData.stop_id) : null,
                 parent_id: formData.parent_id || null,
                 student_id_number: formData.student_id_number || null,
             };

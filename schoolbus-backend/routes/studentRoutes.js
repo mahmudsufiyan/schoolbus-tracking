@@ -168,13 +168,19 @@ router.post('/:id/regenerate-qr', verifyToken, checkRole(['admin']), async (req,
 router.post('/', verifyToken, checkRole(['admin', 'parent']), async (req, res) => {
     const { full_name, grade, school_name, bus_id, stop_id, parent_id, student_id_number } = req.body;
     if (!full_name) return res.status(400).json({ message: 'Full name is required' });
+    
     try {
         const actualParentId = req.user.role === 'parent' ? req.user.id : (parent_id || req.user.id);
+        
+        // 🆕 Force integers to ensure DB matches Driver Bus ID
+        const finalBusId = bus_id ? parseInt(bus_id) : null;
+        const finalStopId = stop_id ? parseInt(stop_id) : null;
+
         const result = await pool.query(
             `INSERT INTO students (full_name, parent_id, bus_id, stop_id, grade, school_name, student_id_number, totp_secret)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING *`,
-            [full_name, actualParentId, bus_id || null, stop_id || null, grade || null, school_name || null, student_id_number || null, 'dummy_secret_' + Date.now()]
+            [full_name, actualParentId, finalBusId, finalStopId, grade || null, school_name || null, student_id_number || null, 'dummy_secret_' + Date.now()]
         );
         res.status(201).json({ success: true, student: result.rows[0] });
     } catch (error) {
