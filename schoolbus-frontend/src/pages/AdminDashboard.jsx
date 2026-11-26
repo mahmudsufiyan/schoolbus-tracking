@@ -56,11 +56,11 @@ const AdminDashboard = () => {
     const { socket, on, isConnected } = useSocket();
 
     const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window !== 'undefined') {
-        return window.innerWidth >= 1024; // open on desktop, closed on mobile
-    }
-    return true;
-});
+        if (typeof window !== 'undefined') {
+            return window.innerWidth >= 1024;
+        }
+        return true;
+    });
     const [activeTab, setActiveTab] = useState('dashboard');
     const [showNotification, setShowNotification] = useState(false);
     const [darkMode, setDarkMode] = useState(() => {
@@ -74,7 +74,8 @@ const AdminDashboard = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
-    const [showInactiveUsers, setShowInactiveUsers] = useState(false);   // 👈 ADD THIS
+    const [showInactiveUsers, setShowInactiveUsers] = useState(false);
+    const [selectedGrade, setSelectedGrade] = useState(''); // 🆕 grade filter
 
     const [buses, setBuses] = useState([]);
     const [stops, setStops] = useState([]);
@@ -156,7 +157,8 @@ const AdminDashboard = () => {
         else document.documentElement.classList.remove('dark');
     }, [darkMode]);
 
-    const fetchData = async () => {
+    // 🆕 silent flag
+    const fetchData = async (silent = false) => {
         setLoading(true);
         try {
             const [busesRes, stopsRes, driversRes, studentsRes, alertsRes, usersRes, pendingUsersRes, regRes] =
@@ -193,7 +195,6 @@ const AdminDashboard = () => {
 
             setStats({
                 totalBuses: busesRes.data?.length || 0,
-                // ✅ Only count ACTIVE drivers (excludes deactivated ones)
                 totalDrivers: (driversRes.data || []).filter(d => d.is_active !== false).length,
                 activeTrips: activeBuses,
                 emergencies: activeAlerts,
@@ -202,15 +203,16 @@ const AdminDashboard = () => {
                 totalSchools: uniqueSchools,
             });
 
-            showToast('Data refreshed successfully', 'success');
+            if (!silent) showToast('Data refreshed successfully', 'success');
         } catch (error) {
             console.error('❌ Error fetching data:', error);
-            showToast('Failed to load data', 'error');
+            if (!silent) showToast('Failed to load data', 'error');
         } finally {
             setLoading(false);
         }
     };
 
+    // kept for future use, but no longer polled (see note)
     const fetchUnconfirmedDropoffs = async () => {
         try {
             const res = await apiClient.get('/students/admin/unconfirmed-dropoffs');
@@ -220,15 +222,16 @@ const AdminDashboard = () => {
         }
     };
 
-    useEffect(() => { fetchData(); }, []);
+    // 🆕 silent on mount
+    useEffect(() => { fetchData(true); }, []);
 
     useEffect(() => {
         if (!socket || !isConnected) return;
         const unsubNew = on('emergency-alert', (data) => {
             showToast(`🚨 Emergency on bus ${data.bus_id}!`, 'error');
-            fetchData();
+            fetchData(true);
         });
-        const unsubResolved = on('alert-resolved', () => fetchData());
+        const unsubResolved = on('alert-resolved', () => fetchData(true));
         const unsubDropped = on('student-dropped-off', () => setTimeout(fetchUnconfirmedDropoffs, 1000));
         const unsubConfirmed = on('dropoff-confirmed', () => fetchUnconfirmedDropoffs());
         const unsubAI = on('ai-analysis-ready', (data) => {
@@ -261,7 +264,7 @@ const AdminDashboard = () => {
                 await apiClient.put(`/admin/users/${userId}/approve`);
                 showToast('User approved successfully', 'success');
             }
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             showToast(error.response?.data?.message || 'Failed to approve user', 'error');
         }
@@ -284,7 +287,7 @@ const AdminDashboard = () => {
             setShowRejectUserModal(false);
             setRejectUserReason('');
             showToast('User rejected successfully', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             showToast(error.response?.data?.message || 'Failed to reject user', 'error');
         }
@@ -294,7 +297,7 @@ const AdminDashboard = () => {
         try {
             await apiClient.put(`/admin/parent-registrations/${id}/approve`);
             showToast('Registration approved successfully', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             showToast('Failed to approve registration', 'error');
         }
@@ -310,7 +313,7 @@ const AdminDashboard = () => {
             setShowRejectModal(false);
             setRejectReason('');
             showToast('Registration rejected', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             showToast('Failed to reject registration', 'error');
         }
@@ -337,7 +340,7 @@ const AdminDashboard = () => {
             const res = await apiClient.post(`/students/${qrStudent.id}/regenerate-qr`);
             setQrStudent(res.data.student);
             showToast('New QR generated', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (err) {
             showToast('Failed to regenerate', 'error');
         } finally {
@@ -405,7 +408,7 @@ const AdminDashboard = () => {
         try {
             await apiClient.delete(`/buses/${id}`);
             showToast('Bus deleted successfully', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             const msg = error.response?.data?.message || error.message || 'Failed to delete bus';
             showToast(msg, 'error');
@@ -416,7 +419,7 @@ const AdminDashboard = () => {
         try {
             await apiClient.put(`/buses/${busId}/assign-driver`, { driver_id: driverId || null });
             showToast(driverId ? 'Driver assigned' : 'Driver unassigned', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             const msg = error.response?.data?.message || 'Failed to assign driver';
             showToast(msg, 'error');
@@ -431,7 +434,10 @@ const AdminDashboard = () => {
             const payload = {
                 bus_number: formData.bus_number,
                 plate_number: formData.plate_number,
-                capacity: formData.capacity ? parseInt(formData.capacity) : 40,
+                // 🆕 NaN guard
+                capacity: formData.capacity !== '' && !Number.isNaN(parseInt(formData.capacity))
+                    ? parseInt(formData.capacity)
+                    : 40,
                 driver_id: formData.driver_id ? parseInt(formData.driver_id) : null,
             };
             if (editingItem) {
@@ -442,7 +448,7 @@ const AdminDashboard = () => {
                 showToast('Bus created successfully', 'success');
             }
             setShowBusModal(false);
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             setFormError(error.response?.data?.message || 'Failed to save bus');
         } finally {
@@ -475,7 +481,7 @@ const AdminDashboard = () => {
         try {
             await apiClient.delete(`/stops/${id}`);
             showToast('Stop deleted successfully', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             const msg = error.response?.data?.message || error.message || 'Failed to delete stop';
             showToast(msg, 'error');
@@ -501,7 +507,7 @@ const AdminDashboard = () => {
                 showToast('Stop created successfully', 'success');
             }
             setShowStopModal(false);
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             setFormError(error.response?.data?.message || 'Failed to save stop');
         } finally {
@@ -528,13 +534,12 @@ const AdminDashboard = () => {
         setShowDriverModal(true);
     };
 
-    // ✅ Backend soft-deletes (deactivates) the driver — see driverRoutes.js
     const handleDeleteDriver = async (id) => {
         if (!window.confirm('Deactivate this driver? They will be unassigned from any bus.')) return;
         try {
             await apiClient.delete(`/drivers/${id}`);
             showToast('Driver deactivated successfully', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             console.error('Deactivate driver error:', error);
             const msg = error.response?.data?.message || error.message || 'Failed to deactivate driver';
@@ -565,7 +570,7 @@ const AdminDashboard = () => {
                 showToast('Driver created successfully', 'success');
             }
             setShowDriverModal(false);
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             setFormError(error.response?.data?.message || 'Failed to save driver');
         } finally {
@@ -603,14 +608,14 @@ const AdminDashboard = () => {
         try {
             await apiClient.delete(`/students/${id}`);
             showToast('Student deleted successfully', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             const msg = error.response?.data?.message || error.message || 'Failed to delete student';
             showToast(msg, 'error');
         }
     };
 
-        const handleSubmitStudent = async (e) => {
+    const handleSubmitStudent = async (e) => {
         e.preventDefault();
         setFormLoading(true);
         setFormError('');
@@ -619,7 +624,6 @@ const AdminDashboard = () => {
                 ...formData,
                 grade: formData.grade || null,
                 school_name: formData.school_name || null,
-                // 🆕 FORCE NUMBER CONVERSION HERE
                 bus_id: formData.bus_id ? parseInt(formData.bus_id) : null,
                 stop_id: formData.stop_id ? parseInt(formData.stop_id) : null,
                 parent_id: formData.parent_id || null,
@@ -633,7 +637,7 @@ const AdminDashboard = () => {
                 showToast('Student created successfully', 'success');
             }
             setShowStudentModal(false);
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             setFormError(error.response?.data?.message || 'Failed to save student');
         } finally {
@@ -646,7 +650,7 @@ const AdminDashboard = () => {
         try {
             await apiClient.put(`/alerts/${id}/resolve`);
             showToast('Alert resolved successfully', 'success');
-            await fetchData();
+            await fetchData(true);
         } catch (error) {
             showToast(error.response?.data?.message || 'Failed to resolve alert', 'error');
         }
@@ -697,13 +701,14 @@ const AdminDashboard = () => {
         return { headers, data: result };
     };
 
+    // 🆕 CSV-only
     const handleImportFileChange = (e, type) => {
         const file = e.target.files[0];
         if (!file) return;
 
-        const validTypes = ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
-        if (!validTypes.includes(file.type) && !file.name.endsWith('.csv') && !file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
-            setImportError('Please upload a CSV or Excel file.');
+        const validTypes = ['text/csv', 'application/vnd.ms-excel'];
+        if (!validTypes.includes(file.type) && !file.name.endsWith('.csv')) {
+            setImportError('Please upload a CSV file.');
             return;
         }
 
@@ -785,7 +790,7 @@ const AdminDashboard = () => {
             setImportPreview([]);
             setImportHeaders([]);
             document.getElementById('driverImportInput').value = '';
-            await fetchData();
+            await fetchData(true);
             showToast(`${response.data?.count || drivers.length} drivers imported`, 'success');
         } catch (error) {
             console.error('Import error:', error);
@@ -865,7 +870,7 @@ const AdminDashboard = () => {
             setImportPreview([]);
             setImportHeaders([]);
             document.getElementById('studentImportInput').value = '';
-            await fetchData();
+            await fetchData(true);
             showToast(`${count} students imported`, 'success');
         } catch (error) {
             console.error('Import error:', error);
@@ -1212,7 +1217,7 @@ const AdminDashboard = () => {
                             </h3>
                             <p className="text-xs text-gray-400 dark:text-gray-500">No pending users – all accounts are approved.</p>
                         </div>
-                        <button onClick={fetchData} className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition flex items-center gap-1 text-sm">
+                        <button onClick={() => fetchData()} className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition flex items-center gap-1 text-sm">
                             <RefreshCw size={16} /> Refresh
                         </button>
                     </div>
@@ -1244,7 +1249,7 @@ const AdminDashboard = () => {
                             <option value="driver">Drivers</option>
                             <option value="police">Police</option>
                         </select>
-                        <button onClick={fetchData} className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition flex items-center gap-1 text-sm">
+                        <button onClick={() => fetchData()} className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition flex items-center gap-1 text-sm">
                             <RefreshCw size={16} /> Refresh
                         </button>
                     </div>
@@ -1364,23 +1369,26 @@ const AdminDashboard = () => {
                         </div>
                     )}
                 </AnimatePresence>
-                
+
+                {/* 🆕 Mounted user detail modal */}
+                <AnimatePresence>
+                    {showUserDetailModal && renderUserDetailModal()}
+                </AnimatePresence>
             </motion.div>
         );
     };
 
     const renderUsers = () => {
-    const filteredUsers = users.filter(u => {
-        // ✅ Hide deactivated users by default unless toggle is on
-        if (!showInactiveUsers && u.is_active === false) return false;
+        const filteredUsers = users.filter(u => {
+            if (!showInactiveUsers && u.is_active === false) return false;
 
-        const matchesSearch = !searchTerm ||
-            u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.phone?.toLowerCase().includes(searchTerm.toLowerCase());
-        return matchesSearch;
-    });
+            const matchesSearch = !searchTerm ||
+                u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                u.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                u.phone?.toLowerCase().includes(searchTerm.toLowerCase());
+            return matchesSearch;
+        });
 
         return (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -1399,27 +1407,26 @@ const AdminDashboard = () => {
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-    {/* 🆕 Toggle to show inactive users */}
-    <button
-        onClick={() => setShowInactiveUsers(v => !v)}
-        className={`px-3 py-2 rounded-xl transition flex items-center gap-1 text-sm border ${
-            showInactiveUsers
-                ? 'bg-red-50 border-red-300 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
-                : 'bg-white border-gray-200 text-gray-700 dark:bg-slate-800 dark:border-slate-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
-        }`}
-        title={showInactiveUsers ? 'Hide deactivated users' : 'Show deactivated users'}
-    >
-        {showInactiveUsers ? <Eye size={16} /> : <Eye size={16} className="opacity-50" />}
-        {showInactiveUsers ? 'Hide Inactive' : 'Show Inactive'}
-    </button>
+                        <button
+                            onClick={() => setShowInactiveUsers(v => !v)}
+                            className={`px-3 py-2 rounded-xl transition flex items-center gap-1 text-sm border ${
+                                showInactiveUsers
+                                    ? 'bg-red-50 border-red-300 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
+                                    : 'bg-white border-gray-200 text-gray-700 dark:bg-slate-800 dark:border-slate-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                            }`}
+                            title={showInactiveUsers ? 'Hide deactivated users' : 'Show deactivated users'}
+                        >
+                            {showInactiveUsers ? <Eye size={16} /> : <Eye size={16} className="opacity-50" />}
+                            {showInactiveUsers ? 'Hide Inactive' : 'Show Inactive'}
+                        </button>
 
-    <button onClick={() => handleExport('csv', 'users')} className="px-3 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition flex items-center gap-1 text-sm">
-        <Download size={16} /> Export
-    </button>
-    <button onClick={fetchData} className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition flex items-center gap-1 text-sm">
-        <RefreshCw size={16} /> Refresh
-    </button>
-</div>
+                        <button onClick={() => handleExport('csv', 'users')} className="px-3 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition flex items-center gap-1 text-sm">
+                            <Download size={16} /> Export
+                        </button>
+                        <button onClick={() => fetchData()} className="px-3 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition flex items-center gap-1 text-sm">
+                            <RefreshCw size={16} /> Refresh
+                        </button>
+                    </div>
                 </div>
 
                 <div className="relative">
@@ -1458,17 +1465,17 @@ const AdminDashboard = () => {
                                         <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{userItem.email}</p>
                                         <p className="text-xs text-gray-400 dark:text-gray-500">Phone: {userItem.phone || '--'}</p>
                                         <div className="flex flex-wrap gap-1 mt-1">
-    <span className={`text-xs px-2 py-0.5 rounded-full ${userItem.is_approved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}`}>
-        {userItem.is_approved ? '✅ Approved' : '⏳ Pending'}
-    </span>
-    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-        userItem.is_active
-            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-    }`}>
-        {userItem.is_active ? 'Active' : '⛔ Deactivated'}
-    </span>
-</div>
+                                            <span className={`text-xs px-2 py-0.5 rounded-full ${userItem.is_approved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}`}>
+                                                {userItem.is_approved ? '✅ Approved' : '⏳ Pending'}
+                                            </span>
+                                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                                                userItem.is_active
+                                                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                            }`}>
+                                                {userItem.is_active ? 'Active' : '⛔ Deactivated'}
+                                            </span>
+                                        </div>
                                     </div>
                                     <div className="flex items-center gap-1">
                                         <button onClick={() => { setSelectedUserForDetail(userItem); setShowUserDetailModal(true); }}
@@ -1501,18 +1508,28 @@ const AdminDashboard = () => {
                         ))
                     )}
                 </div>
+
+                {/* 🆕 Mounted user detail modal */}
+                <AnimatePresence>
+                    {showUserDetailModal && renderUserDetailModal()}
+                </AnimatePresence>
             </motion.div>
         );
     };
 
-       const renderUserDetailModal = () => {
+    const DetailItem = ({ label, value }) => (
+        <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-2">
+            <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+            <p className="text-sm font-medium text-gray-800 dark:text-white break-all">{value || '—'}</p>
+        </div>
+    );
+
+    const renderUserDetailModal = () => {
         if (!selectedUserForDetail) return null;
         const u = selectedUserForDetail;
 
-        // 🆕 Look up the registration data for this specific user
         const registration = registrations.find(r => String(r.user_id) === String(u.id));
-        
-        // 🆕 Helper function: Check User table -> Registration table -> Pending fields -> Fallback
+
         const getVal = (field) => {
             if (u[field]) return u[field];
             if (registration && registration[field]) return registration[field];
@@ -1520,20 +1537,31 @@ const AdminDashboard = () => {
             return '--';
         };
 
-        // Handle Date of Birth separately for formatting
-        const dobValue = u.date_of_birth || registration?.date_of_birth;
+        const dobValue = u.date_of_birth || registration?.date_of_birth || u.pending_date_of_birth;
+
+        const handleClose = () => {
+            setShowUserDetailModal(false);
+            setSelectedUserForDetail(null);
+        };
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-                    className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+                <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.9, opacity: 0 }}
+                    className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6"
+                >
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
                             <User size={24} className="text-blue-600" />
                             User Details
                         </h3>
-                        <button onClick={() => { setShowUserDetailModal(false); setSelectedUserForDetail(null); }}
-                            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                        <button
+                            onClick={handleClose}
+                            aria-label="Close"
+                            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                        >
                             <X size={24} />
                         </button>
                     </div>
@@ -1542,38 +1570,51 @@ const AdminDashboard = () => {
                         <div className="flex justify-center">
                             <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-blue-500 bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center">
                                 {u.profile_image ? (
-                                    <img src={u.profile_image} alt={u.full_name} className="w-full h-full object-cover" />
+                                    <img
+                                        src={u.profile_image}
+                                        alt={u.full_name || 'User'}
+                                        className="w-full h-full object-cover"
+                                    />
                                 ) : (
-                                    <span className="text-white text-3xl font-bold">{u.full_name?.charAt(0) || 'U'}</span>
+                                    <span className="text-white text-3xl font-bold">
+                                        {u.full_name?.charAt(0) || 'U'}
+                                    </span>
                                 )}
                             </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <DetailItem label="Full Name" value={u.full_name} />
-                            <DetailItem label="Email" value={u.email} />
+                            <DetailItem label="Full Name" value={u.full_name || '--'} />
+                            <DetailItem label="Email" value={u.email || '--'} />
                             <DetailItem label="Phone" value={u.phone || '--'} />
-                            <DetailItem label="Role" value={u.role} />
+                            <DetailItem label="Role" value={u.role || '--'} />
                             <DetailItem label="Status" value={u.is_approved ? 'Approved' : 'Pending'} />
                             <DetailItem label="Active" value={u.is_active ? 'Active' : 'Inactive'} />
-                            <DetailItem label="Registered" value={new Date(u.created_at).toLocaleString()} />
+                            <DetailItem
+                                label="Registered"
+                                value={u.created_at ? new Date(u.created_at).toLocaleString() : '--'}
+                            />
                         </div>
 
                         {u.role === 'parent' && (
                             <div className="border-t border-gray-200 dark:border-slate-700 pt-3">
                                 <h4 className="font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-                                    <GraduationCap size={18} className="text-blue-600" /> Parent / Student Details
+                                    <GraduationCap size={18} className="text-blue-600" />
+                                    Parent / Student Details
                                 </h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <DetailItem label="Relationship to Student" value={getVal('relationship_to_student')} />
-                                    <DetailItem label="Date of Birth" value={dobValue ? new Date(dobValue).toLocaleDateString() : '--'} />
+                                    <DetailItem
+                                        label="Date of Birth"
+                                        value={dobValue ? new Date(dobValue).toLocaleDateString() : '--'}
+                                    />
                                     <DetailItem label="Gender" value={getVal('gender')} />
                                     <DetailItem label="Occupation" value={getVal('occupation')} />
                                     <DetailItem label="Emergency Contact" value={getVal('emergency_contact')} />
                                     <DetailItem label="Address" value={getVal('address')} />
-                                    
-                                    <div className="col-span-full border-t border-gray-100 dark:border-slate-700/50 my-1"></div>
-                                    
+
+                                    <div className="col-span-full border-t border-gray-100 dark:border-slate-700/50 my-1" />
+
                                     <DetailItem label="Student Name" value={getVal('student_name')} />
                                     <DetailItem label="Student Grade" value={getVal('student_grade')} />
                                     <DetailItem label="Student School" value={getVal('student_school')} />
@@ -1585,7 +1626,8 @@ const AdminDashboard = () => {
                         {u.role === 'police' && (
                             <div className="border-t border-gray-200 dark:border-slate-700 pt-3">
                                 <h4 className="font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-                                    <Shield size={18} className="text-red-600" /> Police Details
+                                    <Shield size={18} className="text-red-600" />
+                                    Police Details
                                 </h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <DetailItem label="Badge Number" value={u.badge_number || '--'} />
@@ -1597,7 +1639,8 @@ const AdminDashboard = () => {
                         {u.role === 'driver' && (
                             <div className="border-t border-gray-200 dark:border-slate-700 pt-3">
                                 <h4 className="font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-                                    <Car size={18} className="text-yellow-600" /> Driver Details
+                                    <Car size={18} className="text-yellow-600" />
+                                    Driver Details
                                 </h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <DetailItem label="License Number" value={u.license_number || '--'} />
@@ -1608,14 +1651,25 @@ const AdminDashboard = () => {
 
                         {u.profile_image && (
                             <div className="border-t border-gray-200 dark:border-slate-700 pt-3">
-                                <DetailItem label="Profile Image" value={<img src={u.profile_image} alt="Profile" className="max-h-48 rounded-lg border" />} />
+                                <DetailItem
+                                    label="Profile Image"
+                                    value={
+                                        <img
+                                            src={u.profile_image}
+                                            alt="Profile"
+                                            className="max-h-48 rounded-lg border"
+                                        />
+                                    }
+                                />
                             </div>
                         )}
                     </div>
 
                     <div className="mt-6 flex justify-end">
-                        <button onClick={() => { setShowUserDetailModal(false); setSelectedUserForDetail(null); }}
-                            className="px-6 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition">
+                        <button
+                            onClick={handleClose}
+                            className="px-6 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition"
+                        >
                             Close
                         </button>
                     </div>
@@ -1623,12 +1677,6 @@ const AdminDashboard = () => {
             </div>
         );
     };
-    const DetailItem = ({ label, value }) => (
-        <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-2">
-            <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-            <p className="text-sm font-medium text-gray-800 dark:text-white break-all">{value || '—'}</p>
-        </div>
-    );
 
     const renderStudents = () => {
         const filteredStudents = students.filter(s => {
@@ -1636,7 +1684,8 @@ const AdminDashboard = () => {
                 s.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 s.student_id_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 s.parent_name?.toLowerCase().includes(searchTerm.toLowerCase());
-            return matchesSearch;
+            const matchesGrade = !selectedGrade || String(s.grade) === String(selectedGrade); // 🆕
+            return matchesSearch && matchesGrade;
         });
 
         return (
@@ -1684,7 +1733,11 @@ const AdminDashboard = () => {
                             value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
                             className="w-full pl-10 pr-4 py-2.5 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white" />
                     </div>
-                    <select className="px-4 py-2.5 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white min-w-[140px]">
+                    <select
+                        value={selectedGrade}
+                        onChange={(e) => setSelectedGrade(e.target.value)}
+                        className="px-4 py-2.5 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white min-w-[140px]"
+                    >
                         <option value="">All Grades</option>
                         {grades.map(g => (
                             <option key={g.grade} value={g.grade}>Grade {g.grade} ({g.student_count})</option>
@@ -1781,11 +1834,11 @@ const AdminDashboard = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Student ID * (Required for Parent link)</label>
-    <input type="text" required value={formData.student_id_number || ''}
-        onChange={(e) => setFormData({ ...formData, student_id_number: e.target.value })}
-        className="w-full px-4 py-2 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white" />
-</div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Student ID * (Required for Parent link)</label>
+                            <input type="text" required value={formData.student_id_number || ''}
+                                onChange={(e) => setFormData({ ...formData, student_id_number: e.target.value })}
+                                className="w-full px-4 py-2 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white" />
+                        </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Parent ID</label>
                             <input type="text" value={formData.parent_id || ''}
@@ -1947,7 +2000,13 @@ const AdminDashboard = () => {
                     <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Capacity</label>
                         <input type="number" value={formData.capacity || 40}
-                            onChange={(e) => setFormData({ ...formData, capacity: parseInt(e.target.value) || 0 })}
+                            onChange={(e) =>
+                                setFormData({
+                                    ...formData,
+                                    // 🆕 NaN-safe
+                                    capacity: e.target.value === '' ? '' : parseInt(e.target.value),
+                                })
+                            }
                             className="w-full px-4 py-2 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white" />
                     </div>
                     <div>
@@ -2097,12 +2156,8 @@ const AdminDashboard = () => {
         </div>
     );
 
-    // ============================================================
-    // DRIVERS — filters out deactivated drivers
-    // ============================================================
     const renderDrivers = () => {
         const filteredDrivers = drivers.filter(d => {
-            // ✅ Hide deactivated drivers
             if (d.is_active === false) return false;
             return !searchTerm ||
                 d.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -2195,8 +2250,8 @@ const AdminDashboard = () => {
                     </div>
                     {!editingItem && (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password (default: 123456)</label>
-                            <input type="text" value={formData.password || '123456'}
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+                            <input type="text" value={formData.password || ''}
                                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                                 className="w-full px-4 py-2 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 dark:bg-slate-800/50 text-gray-800 dark:text-white" />
                         </div>
@@ -2219,6 +2274,9 @@ const AdminDashboard = () => {
         </div>
     );
 
+    // NOTE: The rest of the file (renderImportStudentModal, renderImportDriverModal,
+    // renderAlerts, renderReports, renderSettings, and the main return/JSX shell)
+    // is unchanged — keep it exactly as you have it.
     const renderImportDriverModal = () => (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
