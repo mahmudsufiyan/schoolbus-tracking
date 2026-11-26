@@ -98,6 +98,7 @@ router.post('/register', async (req, res) => {
         }
 
         // ============================================================
+                // ============================================================
         // 🆕 PARENT REGISTRATION: STRICT VALIDATION
         // ============================================================
         if (role === 'parent' || !role) {
@@ -142,7 +143,24 @@ router.post('/register', async (req, res) => {
 
             const user = result.rows[0];
 
-            // 3. Link the parent to the student
+            // 3. 🆕 INSERT INTO parent_registrations
+            // This is what makes the student data show up in the Admin Dashboard!
+            await pool.query(
+                `INSERT INTO parent_registrations (
+                    user_id, full_name, email, phone, address, 
+                    date_of_birth, gender, occupation, emergency_contact, relationship_to_student,
+                    student_name, student_grade, student_school, student_id_number, 
+                    status, approved_by, approved_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'approved', 1, NOW())`,
+                [
+                    user.id, full_name, email, phone, address || null,
+                    date_of_birth || null, gender || null, occupation || null,
+                    emergency_contact || null, relationship_to_student || null,
+                    student_name || null, student_grade || null, student_school || null, student_id_number
+                ]
+            );
+
+            // 4. Link the parent to the student
             await pool.query(
                 'UPDATE students SET parent_id = $1 WHERE id = $2',
                 [user.id, studentId]
@@ -154,7 +172,7 @@ router.post('/register', async (req, res) => {
                 { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
             );
 
-            console.log(`✅ [REGISTER] Parent auto-approved and linked to student ${studentId}`);
+            console.log(`✅ [REGISTER] Parent auto-approved, linked to student ${studentId}, and saved to parent_registrations`);
 
             return res.status(201).json({
                 success: true,

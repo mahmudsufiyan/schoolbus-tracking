@@ -1509,6 +1509,13 @@ const AdminDashboard = () => {
         if (!selectedUserForDetail) return null;
         const u = selectedUserForDetail;
 
+        // 🆕 Find the matching registration to guarantee student details show up
+        const registration = registrations.find(r => String(r.user_id) === String(u.id));
+        const studentName = u.student_name || u.pending_student_name || registration?.student_name || '--';
+        const studentGrade = u.student_grade || u.pending_student_grade || registration?.student_grade || '--';
+        const studentSchool = u.student_school || u.pending_student_school || registration?.student_school || '--';
+        const studentId = u.student_id_number || u.pending_student_id_number || registration?.student_id_number || '--';
+
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                 <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
@@ -1551,16 +1558,16 @@ const AdminDashboard = () => {
                                     <GraduationCap size={18} className="text-blue-600" /> Parent / Student Details
                                 </h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <DetailItem label="Relationship to Student" value={u.relationship_to_student || '--'} />
-                                    <DetailItem label="Student Name" value={u.student_name || u.pending_student_name || '--'} />
-                                    <DetailItem label="Student Grade" value={u.student_grade || u.pending_student_grade || '--'} />
-                                    <DetailItem label="Student School" value={u.student_school || u.pending_student_school || '--'} />
-                                    <DetailItem label="Student ID" value={u.student_id_number || u.pending_student_id_number || '--'} />
-                                    <DetailItem label="Address" value={u.address || '--'} />
-                                    <DetailItem label="Date of Birth" value={u.date_of_birth ? new Date(u.date_of_birth).toLocaleDateString() : '--'} />
-                                    <DetailItem label="Gender" value={u.gender || '--'} />
-                                    <DetailItem label="Occupation" value={u.occupation || '--'} />
-                                    <DetailItem label="Emergency Contact" value={u.emergency_contact || '--'} />
+                                    <DetailItem label="Relationship to Student" value={u.relationship_to_student || registration?.relationship_to_student || '--'} />
+                                    <DetailItem label="Student Name" value={studentName} />
+                                    <DetailItem label="Student Grade" value={studentGrade} />
+                                    <DetailItem label="Student School" value={studentSchool} />
+                                    <DetailItem label="Student ID" value={studentId} />
+                                    <DetailItem label="Address" value={u.address || registration?.address || '--'} />
+                                    <DetailItem label="Date of Birth" value={u.date_of_birth ? new Date(u.date_of_birth).toLocaleDateString() : (registration?.date_of_birth ? new Date(registration.date_of_birth).toLocaleDateString() : '--')} />
+                                    <DetailItem label="Gender" value={u.gender || registration?.gender || '--'} />
+                                    <DetailItem label="Occupation" value={u.occupation || registration?.occupation || '--'} />
+                                    <DetailItem label="Emergency Contact" value={u.emergency_contact || registration?.emergency_contact || '--'} />
                                 </div>
                             </div>
                         )}
