@@ -190,38 +190,121 @@ router.post('/', verifyToken, checkRole(['admin', 'parent']), async (req, res) =
 });
 
 // =============================================
-// ADMIN: PUT update student (FIXED TO SAVE BUS ID)
+
+// =============================================
+// ADMIN: PUT update student (FIXED INTEGER NaN)
 // =============================================
 router.put('/:id', verifyToken, checkRole(['admin', 'parent']), async (req, res) => {
     const { id } = req.params;
-    const { full_name, grade, school_name, bus_id, stop_id, student_id_number } = req.body;
-    
+    const {
+        full_name,
+        grade,
+        school_name,
+        bus_id,
+        stop_id,
+        student_id_number
+    } = req.body;
+
     try {
-        // Ensure empty strings are saved as null, and valid IDs are saved as numbers
-        const finalBusId = (bus_id === '' || bus_id === undefined) ? null : parseInt(bus_id);
-        const finalStopId = (stop_id === '' || stop_id === undefined) ? null : parseInt(stop_id);
+        // Check whether bus_id and stop_id were actually provided
+        const hasBusId = Object.prototype.hasOwnProperty.call(req.body, 'bus_id');
+        const hasStopId = Object.prototype.hasOwnProperty.call(req.body, 'stop_id');
+
+        // Validate student ID
+        const studentId = Number(id);
+
+        if (!Number.isSafeInteger(studentId) || studentId <= 0) {
+            return res.status(400).json({
+                message: 'Invalid student ID'
+            });
+        }
+
+        // Safely convert optional foreign keys
+        const parseNullableId = (value, field) => {
+            if (value === null || value === undefined || value === '') {
+                return null;
+            }
+
+            const parsed = Number(value);
+
+            if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+                throw new Error(`Invalid ${field}. Expected a positive integer.`);
+            }
+
+            return parsed;
+        };
+
+        const finalBusId = hasBusId
+            ? parseNullableId(bus_id, 'bus_id')
+            : null;
+
+        const finalStopId = hasStopId
+            ? parseNullableId(stop_id, 'stop_id')
+            : null;
 
         const result = await pool.query(
-            `UPDATE students 
+            `UPDATE students
              SET full_name = COALESCE($1, full_name),
                  grade = COALESCE($2, grade),
                  school_name = COALESCE($3, school_name),
-                 bus_id = $4,     
-                 stop_id = $5,    
-                 student_id_number = COALESCE($6, student_id_number),
+
+                 bus_id = CASE
+                     WHEN $4::boolean THEN $5::integer
+                     ELSE bus_id
+                 END,
+
+                 stop_id = CASE
+                     WHEN $6::boolean THEN $7::integer
+                     ELSE stop_id
+                 END,
+
+                 student_id_number = COALESCE($8, student_id_number),
                  updated_at = NOW()
-             WHERE id = $7
+
+             WHERE id = $9
              RETURNING *`,
-            [full_name, grade, school_name, finalBusId, finalStopId, student_id_number, id]
+
+            [
+                full_name ?? null,
+                grade ?? null,
+                school_name ?? null,
+                hasBusId,
+                finalBusId,
+                hasStopId,
+                finalStopId,
+                student_id_number ?? null,
+                studentId
+            ]
         );
-        
-        if (result.rows.length === 0) return res.status(404).json({ message: 'Student not found' });
-        res.json({ success: true, student: result.rows[0] });
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: 'Student not found'
+            });
+        }
+
+        return res.json({
+            success: true,
+            message: 'Student information updated successfully',
+            student: result.rows[0]
+        });
+
     } catch (error) {
         console.error('Error updating student:', error);
-        res.status(500).json({ message: 'Server error' });
+
+        if (error.message.startsWith('Invalid bus_id') ||
+            error.message.startsWith('Invalid stop_id')) {
+            return res.status(400).json({
+                message: error.message
+            });
+        }
+
+        return res.status(500).json({
+            message: 'Server error'
+        });
     }
 });
+
 
 // =============================================
 // ADMIN: DELETE student AND automatically delete linked parent
