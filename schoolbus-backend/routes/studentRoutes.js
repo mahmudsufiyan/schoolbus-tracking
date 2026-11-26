@@ -368,14 +368,24 @@ router.post('/scan', verifyToken, checkRole(['driver']), async (req, res) => {
             rejectReason = `Student belongs to a different bus (Bus ID: ${studentBusId})`;
         }
 
-               const scanResult = await client.query(
-            `INSERT INTO student_scans
-                (student_id, bus_id, trip_id, driver_id, scan_type, verified, reject_reason)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING id, scanned_at`,
-            [student.id, bus.id, trip?.id || null, driver_id, scan_type,
-             rejectReason === null, rejectReason]
-        );
+           const scanResult = await client.query(
+    `INSERT INTO student_scans
+        (student_id, bus_id, trip_id, driver_id, scan_type,
+         verified, reject_reason, latitude, longitude)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id, scanned_at`,
+    [
+        student.id,
+        bus.id,
+        trip?.id || null,
+        driver_id,
+        scan_type,
+        rejectReason === null,
+        rejectReason,
+        latitude ?? null,
+        longitude ?? null
+    ]
+);
 
         await client.query('COMMIT');
 
