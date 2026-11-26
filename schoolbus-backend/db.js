@@ -1,4 +1,5 @@
-﻿const { Pool } = require('pg');
+﻿
+const { Pool } = require('pg');
 require('dotenv').config();
 
 // ============================================================
@@ -14,7 +15,7 @@ if (process.env.DATABASE_URL) {
         connectionString: process.env.DATABASE_URL,
         ssl: process.env.DATABASE_URL.includes('localhost')
             ? false
-            : { rejectUnauthorized: false }, // Render requires this
+            : { rejectUnauthorized: false },
     };
 } else {
     // Local development
@@ -36,5 +37,37 @@ pool.on('connect', () => {
 pool.on('error', (err) => {
     console.error('❌ PostgreSQL error:', err);
 });
+
+// ============================================================
+// TEMPORARY DATABASE DIAGNOSTICS
+// ============================================================
+(async () => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                current_database() AS database_name,
+                current_schema() AS schema_name,
+                current_user AS database_user
+        `);
+
+        console.log('🔍 DATABASE INFO:', result.rows[0]);
+
+        const columns = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'student_scans'
+            ORDER BY ordinal_position
+        `);
+
+        console.log(
+            '🔍 STUDENT SCANS COLUMNS:',
+            columns.rows.map(row => row.column_name)
+        );
+
+    } catch (error) {
+        console.error('❌ DATABASE DIAGNOSTIC ERROR:', error);
+    }
+})();
 
 module.exports = pool;
